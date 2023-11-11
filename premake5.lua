@@ -12,7 +12,10 @@ project "Skia"
 		"./include/**.h",
 		
 		"./src/**.h",
-		"./src/**.cpp"
+		"./src/**.cpp",
+
+		"./modules/skcms/**.h",
+		"./modules/skcms/**.cc",
 	}
 
 	includedirs {
@@ -55,8 +58,8 @@ project "Skia"
 
 		"./src/ports/*NDK*",
 		"./src/ports/*SkFontMgr_win*",
-		"./src/ports/*SkFontMgr_empty_factory*",
 		"./src/ports/*SkFontMgr_custom_empty_factory*",
+		"./src/ports/*SkFontMgr_custom_embedded_factory*",
 		"./src/ports/*SkFontMgr_custom_directory_factory*",
 
 		"./src/**/*dawn*",
