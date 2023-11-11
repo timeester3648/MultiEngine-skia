@@ -25,6 +25,13 @@
 #include "src/gpu/graphite/vk/VulkanTexture.h"
 #include "src/gpu/vk/VulkanUtilsPriv.h"
 
+// Note: to support timeline semaphore
+#if MLE_SUPPORTS_VULKAN_API
+	#include <vulkan/vulkan.hpp>
+	#include <MultiEngine/graphics/Fence.h>
+	#include <MultiEngine/graphics/api/vulkan/VulkanCommandQueue.h>
+#endif
+
 using namespace skia_private;
 
 namespace skgpu::graphite {
@@ -334,7 +341,49 @@ bool VulkanCommandBuffer::submit(VkQueue queue) {
     }
     return true;
 }
+#if MLE_SUPPORTS_VULKAN_API
+bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
+                                 const MultiEngine::CommandQueue* queue,
+                                 const std::uint64_t wait,
+                                 const std::uint64_t signal) {
+    this->end();
 
+    auto interface = fSharedContext->interface();
+    auto device = vk::Device(fSharedContext->device());
+
+    const auto flags = vk::PipelineStageFlagBits2::eFragmentShader |
+                       vk::PipelineStageFlagBits2::eTransfer;
+    const auto vk_queue = static_cast<const MultiEngine::VulkanCommandQueue*>(queue);
+
+	vk::SubmitInfo2 submitInfo = {};
+
+    const vk::CommandBufferSubmitInfo cmSubInfo = { .commandBuffer = fPrimaryCommandBuffer };
+
+    const auto& semaphore = *fence->getNativeFence<vk::Semaphore>();
+
+    const std::array waits = { vk::SemaphoreSubmitInfo{.semaphore = semaphore, .value = wait, .stageMask = flags } };
+
+    const std::array signals = { vk::SemaphoreSubmitInfo{.semaphore = semaphore, .value = signal } };
+
+    submitInfo.commandBufferInfoCount = 1;
+    submitInfo.pCommandBufferInfos = &cmSubInfo;
+    submitInfo.pWaitSemaphoreInfos = waits.data();
+    submitInfo.pSignalSemaphoreInfos = signals.data();
+    submitInfo.waitSemaphoreInfoCount = static_cast<uint32>(waits.size());
+    submitInfo.signalSemaphoreInfoCount = static_cast<uint32>(signals.size());
+
+	vk::ProtectedSubmitInfo protectedSubmitInfo;
+
+	if (fSharedContext->isProtected() == Protected::kYes) {
+        protectedSubmitInfo.protectedSubmit = VK_TRUE;
+        submitInfo.pNext = &protectedSubmitInfo;
+	}
+
+    vk_queue->mutex.lock();
+    vk_queue->queue.submit2(submitInfo, nullptr);
+    vk_queue->mutex.unlock();
+}
+#endif
 bool VulkanCommandBuffer::isFinished() {
     SkASSERT(!fActive);
     if (VK_NULL_HANDLE == fSubmitFence) {

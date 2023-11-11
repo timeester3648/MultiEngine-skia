@@ -19,6 +19,9 @@ project "Skia"
 	}
 
 	includedirs {
+		"%{IncludeDir.mle}",
+		"%{IncludeDir.intrinsics}",
+		
 		"%{IncludeDir.icu}",
 		"%{IncludeDir.vma}",
 		"%{IncludeDir.skia}",
@@ -76,11 +79,7 @@ project "Skia"
 	}
 
 	defines {
-		"SK_VULKAN",
 		"SK_USE_VMA",
-
-		"SK_GANESH",
-		"SK_GRAPHITE",
 
 		"SK_TYPEFACE_FACTORY_FREETYPE",
 		"SK_FREETYPE_MININUM_RUNTIME_VERSION_IS_BUILD_VERSION",

@@ -14,6 +14,14 @@
 #include "src/gpu/graphite/DrawPass.h"
 #include "src/gpu/graphite/vk/VulkanGraphicsPipeline.h"
 
+// Note: to support timeline semaphore
+#include <MultiEngine/MultiEngineConfig.h>
+
+namespace MultiEngine {
+	class Fence;
+	class CommandQueue;
+}
+
 namespace skgpu::graphite {
 
 class VulkanResourceProvider;
@@ -29,7 +37,12 @@ public:
     bool setNewCommandBufferResources() override;
 
     bool submit(VkQueue);
-
+#if MLE_SUPPORTS_VULKAN_API
+    bool submit(const MultiEngine::Fence* fence, 
+				const MultiEngine::CommandQueue* queue,
+                const std::uint64_t wait,
+                const std::uint64_t signal);
+#endif
     bool isFinished();
 
     void waitUntilFinished();
