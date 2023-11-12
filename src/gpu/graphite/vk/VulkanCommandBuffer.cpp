@@ -420,6 +420,8 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
     vk_queue->queue.submit2(submitInfo, vk_cmd->getFence());
     vk_queue->mutex.unlock();
 
+	vk_cmd->useFence();
+
 	return true;
 }
 
@@ -438,13 +440,15 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
 #endif
 bool VulkanCommandBuffer::isFinished() {
     SkASSERT(!fActive);
-    if (VK_NULL_HANDLE == fSubmitFence) {
+    // Note: to support timeline semaphore
+    /*if (VK_NULL_HANDLE == fSubmitFence) {
         return true;
-    }
+    }*/
 
+    const auto vk_cmd = static_cast<const MultiEngine::VulkanCommandBuffer*>(this->mleBuffer);
     VkResult err;
     VULKAN_CALL_RESULT_NOCHECK(fSharedContext->interface(), err,
-                               GetFenceStatus(fSharedContext->device(), fSubmitFence));
+                               GetFenceStatus(fSharedContext->device(), vk_cmd->getFence()));
     switch (err) {
         case VK_SUCCESS:
         case VK_ERROR_DEVICE_LOST:
