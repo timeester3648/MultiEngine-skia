@@ -11,6 +11,9 @@
 #if MLE_SUPPORTS_VULKAN_API
 	#include <vulkan/vulkan.hpp>
 	#include <MultiEngine/graphics/Fence.h>
+	#include <MultiEngine/graphics/buffer/CommandBuffer.h>
+	#include <MultiEngine/graphics/buffer/CommandBufferPool.h>
+	#include <MultiEngine/graphics/api/vulkan/VulkanSwapchain.h>
 	#include <MultiEngine/graphics/api/vulkan/VulkanCommandQueue.h>
 #endif
 
@@ -101,6 +104,14 @@ std::unique_ptr<VulkanCommandBuffer> VulkanCommandBuffer::Make(
                                                                         resourceProvider));
 }
 
+std::unique_ptr<VulkanCommandBuffer> VulkanCommandBuffer::Make(
+        const VulkanSharedContext* sharedContext,
+        VulkanResourceProvider* resourceProvider,
+        MultiEngine::CommandBufferPool* pool) {
+    return std::unique_ptr<VulkanCommandBuffer>(
+            new VulkanCommandBuffer(pool, sharedContext, resourceProvider));
+}
+
 VulkanCommandBuffer::VulkanCommandBuffer(VkCommandPool pool,
                                          VkCommandBuffer primaryCommandBuffer,
                                          const VulkanSharedContext* sharedContext,
@@ -109,6 +120,18 @@ VulkanCommandBuffer::VulkanCommandBuffer(VkCommandPool pool,
         , fPrimaryCommandBuffer(primaryCommandBuffer)
         , fSharedContext(sharedContext)
         , fResourceProvider(resourceProvider) {
+    // When making a new command buffer, we automatically begin the command buffer
+    this->begin();
+}
+
+VulkanCommandBuffer::VulkanCommandBuffer(MultiEngine::CommandBufferPool* pool,
+                                         const VulkanSharedContext* sharedContext,
+                                         VulkanResourceProvider* resourceProvider)
+        : mlePool(pool), fSharedContext(sharedContext)
+        , fResourceProvider(resourceProvider) {
+    this->mleBuffer = MultiEngine::CommandBuffer::create(MultiEngine::CommandBufferLevel::ePrimary,
+														 MultiEngine::CommandBufferType::eGraphics, pool);
+    fPrimaryCommandBuffer = *this->mleBuffer->getNativeCommandBuffer<vk::CommandBuffer>();
     // When making a new command buffer, we automatically begin the command buffer
     this->begin();
 }
@@ -125,17 +148,21 @@ VulkanCommandBuffer::~VulkanCommandBuffer() {
                                                               fSubmitFence,
                                                               nullptr));
     }
-    // This should delete any command buffers as well.
-    VULKAN_CALL(fSharedContext->interface(), DestroyCommandPool(fSharedContext->device(),
-                                                                fPool,
-                                                                nullptr));
+    if (this->mlePool == nullptr) {
+        // This should delete any command buffers as well.
+        VULKAN_CALL(fSharedContext->interface(),
+                    DestroyCommandPool(fSharedContext->device(), fPool, nullptr));
+    }
 }
 
 void VulkanCommandBuffer::onResetCommandBuffer() {
     SkASSERT(!fActive);
-    VULKAN_CALL_ERRCHECK(fSharedContext->interface(), ResetCommandPool(fSharedContext->device(),
-                                                                       fPool,
-                                                                       0));
+    if (this->mlePool == nullptr) {
+        VULKAN_CALL_ERRCHECK(fSharedContext->interface(),
+                             ResetCommandPool(fSharedContext->device(), fPool, 0));
+    } else {
+        this->mleBuffer->reset();
+	}
     fActiveGraphicsPipeline = nullptr;
     fBindUniformBuffers = true;
     fBoundIndexBuffer = VK_NULL_HANDLE;
@@ -384,6 +411,19 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
     vk_queue->mutex.lock();
     vk_queue->queue.submit2(submitInfo, nullptr);
     vk_queue->mutex.unlock();
+
+	return true;
+}
+
+bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
+                                 const MultiEngine::Swapchain* swapchain,
+                                 const std::uint64_t wait,
+                                 const std::uint64_t signal) {
+    this->end();
+
+	SkASSERT(fSharedContext->isProtected() != Protected::kYes);
+
+    swapchain->submit(this->mleBuffer, fence, wait, signal);
 
 	return true;
 }

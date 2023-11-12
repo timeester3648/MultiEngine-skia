@@ -19,7 +19,10 @@
 
 namespace MultiEngine {
 	class Fence;
+	class Swapchain;
 	class CommandQueue;
+    class CommandBuffer;
+    class CommandBufferPool;
 }
 
 namespace skgpu::graphite {
@@ -32,6 +35,10 @@ class VulkanCommandBuffer final : public CommandBuffer {
 public:
     static std::unique_ptr<VulkanCommandBuffer> Make(const VulkanSharedContext*,
                                                      VulkanResourceProvider*);
+    static std::unique_ptr<VulkanCommandBuffer> Make(const VulkanSharedContext*,
+                                                     VulkanResourceProvider*,
+													 MultiEngine::CommandBufferPool* pool);
+
     ~VulkanCommandBuffer() override;
 
     bool setNewCommandBufferResources() override;
@@ -40,6 +47,10 @@ public:
 #if MLE_SUPPORTS_VULKAN_API
     bool submit(const MultiEngine::Fence* fence, 
 				const MultiEngine::CommandQueue* queue,
+                const std::uint64_t wait,
+                const std::uint64_t signal);
+    bool submit(const MultiEngine::Fence* fence, 
+				const MultiEngine::Swapchain* swapchain,
                 const std::uint64_t wait,
                 const std::uint64_t signal);
 #endif
@@ -63,6 +74,9 @@ public:
 private:
     VulkanCommandBuffer(VkCommandPool pool,
                         VkCommandBuffer primaryCommandBuffer,
+                        const VulkanSharedContext* sharedContext,
+                        VulkanResourceProvider* resourceProvider);
+    VulkanCommandBuffer(MultiEngine::CommandBufferPool* pool,
                         const VulkanSharedContext* sharedContext,
                         VulkanResourceProvider* resourceProvider);
 
@@ -174,6 +188,10 @@ private:
 
     VkCommandPool fPool;
     VkCommandBuffer fPrimaryCommandBuffer;
+
+	MultiEngine::CommandBuffer* mleBuffer = nullptr;
+	MultiEngine::CommandBufferPool* mlePool = nullptr;
+
     const VulkanSharedContext* fSharedContext;
     VulkanResourceProvider* fResourceProvider;
 
