@@ -433,7 +433,9 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
 
 	SkASSERT(fSharedContext->isProtected() != Protected::kYes);
 
-    swapchain->submit(this->mleBuffer, fence, wait, signal);
+    swapchain->submit(this->mleBuffer, fence, wait, signal,
+					  MultiEngine::PipelineStage::eFragmentShader |
+					  MultiEngine::PipelineStage::eAllTransfer);
 
 	return true;
 }
