@@ -15,6 +15,7 @@
 	#include <MultiEngine/graphics/buffer/CommandBufferPool.h>
 	#include <MultiEngine/graphics/api/vulkan/VulkanSwapchain.h>
 	#include <MultiEngine/graphics/api/vulkan/VulkanCommandQueue.h>
+	#include <MultiEngine/graphics/api/vulkan/buffer/VulkanCommandBuffer.h>
 #endif
 
 #include "src/gpu/graphite/vk/VulkanCommandBuffer.h"
@@ -192,7 +193,8 @@ bool VulkanCommandBuffer::setNewCommandBufferResources() {
 
 void VulkanCommandBuffer::begin() {
     SkASSERT(!fActive);
-    VkCommandBufferBeginInfo cmdBufferBeginInfo;
+    // Note: to support timeline semaphore
+    /*VkCommandBufferBeginInfo cmdBufferBeginInfo;
     memset(&cmdBufferBeginInfo, 0, sizeof(VkCommandBufferBeginInfo));
     cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cmdBufferBeginInfo.pNext = nullptr;
@@ -200,7 +202,8 @@ void VulkanCommandBuffer::begin() {
     cmdBufferBeginInfo.pInheritanceInfo = nullptr;
 
     VULKAN_CALL_ERRCHECK(fSharedContext->interface(), BeginCommandBuffer(fPrimaryCommandBuffer,
-                                                                         &cmdBufferBeginInfo));
+                                                                         &cmdBufferBeginInfo));*/
+    this->mleBuffer->begin(MultiEngine::CommandBufferUsage::eOneTimeSubmit);
     fActive = true;
 }
 
@@ -210,7 +213,9 @@ void VulkanCommandBuffer::end() {
 
     this->submitPipelineBarriers();
 
-    VULKAN_CALL_ERRCHECK(fSharedContext->interface(), EndCommandBuffer(fPrimaryCommandBuffer));
+	// Note: to support timeline semaphore
+    // VULKAN_CALL_ERRCHECK(fSharedContext->interface(), EndCommandBuffer(fPrimaryCommandBuffer));
+    this->mleBuffer->end();
 
     fActive = false;
 }
@@ -385,6 +390,7 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
     const auto flags = vk::PipelineStageFlagBits2::eFragmentShader |
                        vk::PipelineStageFlagBits2::eTransfer;
     const auto vk_queue = static_cast<const MultiEngine::VulkanCommandQueue*>(queue);
+    const auto vk_cmd = static_cast<const MultiEngine::VulkanCommandBuffer*>(this->mleBuffer);
 
 	vk::SubmitInfo2 submitInfo = {};
 
@@ -411,7 +417,7 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
 	}
 
     vk_queue->mutex.lock();
-    vk_queue->queue.submit2(submitInfo, nullptr);
+    vk_queue->queue.submit2(submitInfo, vk_cmd->getFence());
     vk_queue->mutex.unlock();
 
 	return true;
@@ -455,14 +461,15 @@ bool VulkanCommandBuffer::isFinished() {
 }
 
 void VulkanCommandBuffer::waitUntilFinished() {
-    if (fSubmitFence == VK_NULL_HANDLE) {
-        return;
-    }
-    VULKAN_CALL_ERRCHECK(fSharedContext->interface(), WaitForFences(fSharedContext->device(),
-                                                                    1,
-                                                                    &fSubmitFence,
-                                                                    /*waitAll=*/true,
-                                                                    /*timeout=*/UINT64_MAX));
+    this->mleBuffer->wait();
+    //if (fSubmitFence == VK_NULL_HANDLE) {
+    //    return;
+    //}
+    //VULKAN_CALL_ERRCHECK(fSharedContext->interface(), WaitForFences(fSharedContext->device(),
+    //                                                                1,
+    //                                                                &fSubmitFence,
+    //                                                                /*waitAll=*/true,
+    //                                                                /*timeout=*/UINT64_MAX));
 }
 
 void VulkanCommandBuffer::updateRtAdjustUniform(const SkRect& viewport) {
