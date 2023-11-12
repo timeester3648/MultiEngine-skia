@@ -502,7 +502,8 @@ std::unique_ptr<DrawPass> DrawPass::Make(Recorder* recorder,
 
     // Copy of destination, if needed.
     sk_sp<TextureProxy> dst;
-    SkIPoint dstOffset;
+	// Note: fix runtime check
+    SkIPoint dstOffset{};
     if (!draws->dstCopyBounds().isEmptyNegativeOrNaN()) {
         TRACE_EVENT_INSTANT0("skia.gpu", "DrawPass requires dst copy", TRACE_EVENT_SCOPE_THREAD);
 
