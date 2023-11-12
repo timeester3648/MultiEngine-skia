@@ -20,8 +20,13 @@ project "Skia"
 
 	includedirs {
 		"%{IncludeDir.mle}",
+		"%{IncludeDir.fmt}",
+		"%{IncludeDir.boost}",
+		"%{IncludeDir.spdlog}",
 		"%{IncludeDir.intrinsics}",
-		
+		"%{IncludeDir.magic_enum}",
+		"%{IncludeDir.general_includes}",
+
 		"%{IncludeDir.icu}",
 		"%{IncludeDir.vma}",
 		"%{IncludeDir.skia}",

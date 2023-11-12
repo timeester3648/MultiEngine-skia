@@ -5,6 +5,15 @@
  * found in the LICENSE file.
  */
 
+// Note: to support timeline semaphore
+#include <MultiEngine/MultiEngineConfig.h>
+
+#if MLE_SUPPORTS_VULKAN_API
+	#include <vulkan/vulkan.hpp>
+	#include <MultiEngine/graphics/Fence.h>
+	#include <MultiEngine/graphics/api/vulkan/VulkanCommandQueue.h>
+#endif
+
 #include "src/gpu/graphite/vk/VulkanCommandBuffer.h"
 
 #include "include/gpu/MutableTextureState.h"
@@ -24,13 +33,6 @@
 #include "src/gpu/graphite/vk/VulkanSharedContext.h"
 #include "src/gpu/graphite/vk/VulkanTexture.h"
 #include "src/gpu/vk/VulkanUtilsPriv.h"
-
-// Note: to support timeline semaphore
-#if MLE_SUPPORTS_VULKAN_API
-	#include <vulkan/vulkan.hpp>
-	#include <MultiEngine/graphics/Fence.h>
-	#include <MultiEngine/graphics/api/vulkan/VulkanCommandQueue.h>
-#endif
 
 using namespace skia_private;
 
@@ -382,6 +384,8 @@ bool VulkanCommandBuffer::submit(const MultiEngine::Fence* fence,
     vk_queue->mutex.lock();
     vk_queue->queue.submit2(submitInfo, nullptr);
     vk_queue->mutex.unlock();
+
+	return true;
 }
 #endif
 bool VulkanCommandBuffer::isFinished() {
