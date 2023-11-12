@@ -157,6 +157,11 @@ void setup_vk_attachment_description(VkAttachmentDescription* outAttachment,
             skgpu::SampleCountToVkSampleCount(textureInfo.fSampleCount, &sampleCount));
     outAttachment->samples = sampleCount;
     switch (initialLayout) {
+         // Note: assume normal texture
+        case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:
+        // Note: assume color attachment
+        case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR:
+
         case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
         case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
         case VK_IMAGE_LAYOUT_GENERAL:

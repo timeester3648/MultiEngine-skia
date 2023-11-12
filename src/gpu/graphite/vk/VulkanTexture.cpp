@@ -351,6 +351,16 @@ VkPipelineStageFlags VulkanTexture::LayoutToPipelineSrcStageFlags(const VkImageL
         return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     }
 
+	// Note: assume normal texture
+	if (VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR == layout) {
+        return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+
+	// Note: assume color attachment
+    if (VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR == layout) {
+        return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    }
+
     SkASSERT(VK_IMAGE_LAYOUT_UNDEFINED == layout);
     return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 }
@@ -384,6 +394,17 @@ VkAccessFlags VulkanTexture::LayoutToSrcAccessMask(const VkImageLayout layout) {
         // There are no writes that need to be made available
         flags = 0;
     }
+
+	// Note: assume normal texture
+    if (VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR == layout) {
+        flags = 0;
+    }
+
+    // Note: assume color attachment
+    if (VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR == layout) {
+        flags = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    }
+
     return flags;
 }
 
