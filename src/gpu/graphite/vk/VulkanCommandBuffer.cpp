@@ -130,7 +130,7 @@ VulkanCommandBuffer::VulkanCommandBuffer(MultiEngine::CommandBufferPool* pool,
         : mlePool(pool), fSharedContext(sharedContext)
         , fResourceProvider(resourceProvider) {
     this->mleBuffer = MultiEngine::CommandBuffer::create(MultiEngine::CommandBufferLevel::ePrimary,
-														 MultiEngine::CommandBufferType::eGraphics, pool);
+														 MultiEngine::CommandBufferType::eGraphics, pool).release();
     fPrimaryCommandBuffer = *this->mleBuffer->getNativeCommandBuffer<vk::CommandBuffer>();
     // When making a new command buffer, we automatically begin the command buffer
     this->begin();
@@ -152,6 +152,8 @@ VulkanCommandBuffer::~VulkanCommandBuffer() {
         // This should delete any command buffers as well.
         VULKAN_CALL(fSharedContext->interface(),
                     DestroyCommandPool(fSharedContext->device(), fPool, nullptr));
+    } else {
+        delete this->mleBuffer;
     }
 }
 
