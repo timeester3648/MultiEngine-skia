@@ -32,6 +32,7 @@
 #include "tests/Test.h"
 #include "tools/SkSharingProc.h"
 #include "tools/ToolUtils.h"
+#include "tools/fonts/FontToolUtils.h"
 
 #include <memory>
 #include <vector>
@@ -74,8 +75,9 @@ static void draw_basic(SkCanvas* canvas, int seed, sk_sp<SkImage> image) {
     }
 
     SkPaint paint2;
-    auto text = SkTextBlob::MakeFromString(
-        SkStringPrintf("Frame %d", seed).c_str(), SkFont(nullptr, 2+seed));
+    SkFont font = ToolUtils::DefaultFont();
+    font.setSize(2 + seed);
+    auto text = SkTextBlob::MakeFromString(SkStringPrintf("Frame %d", seed).c_str(), font);
     canvas->drawTextBlob(text.get(), 50, 25, paint2);
 }
 
@@ -187,6 +189,7 @@ DEF_TEST(SkMultiPictureDocument_Serialize_and_deserialize, reporter) {
 #include "include/core/SkColorType.h"
 #include "include/gpu/GrDirectContext.h"
 #include "include/gpu/ganesh/SkImageGanesh.h"
+#include "src/gpu/android/AHardwareBufferUtils.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 
@@ -308,7 +311,7 @@ static sk_sp<SkImage> makeAHardwareBufferTestImage(
         backendFormat,
         false   // isRenderable
     );
-    SkColorType colorType = GrAHardwareBufferUtils::GetSkColorTypeFromBufferFormat(hwbDesc.format);
+    SkColorType colorType = AHardwareBufferUtils::GetSkColorTypeFromBufferFormat(hwbDesc.format);
     sk_sp<SkImage> image = SkImages::BorrowTextureFrom(context,
                                                        texture,
                                                        kTopLeft_GrSurfaceOrigin,

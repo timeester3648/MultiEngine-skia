@@ -7,10 +7,10 @@
 
 #include "src/gpu/graphite/dawn/DawnTexture.h"
 
+#include "include/gpu/MutableTextureState.h"
 #include "include/gpu/graphite/dawn/DawnTypes.h"
 #include "include/private/gpu/graphite/DawnTypesPriv.h"
 #include "src/core/SkMipmap.h"
-#include "src/gpu/MutableTextureStateRef.h"
 #include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/dawn/DawnCaps.h"
 #include "src/gpu/graphite/dawn/DawnGraphiteUtilsPriv.h"
@@ -133,7 +133,8 @@ std::pair<wgpu::TextureView, wgpu::TextureView> create_texture_views(
     }
 
     SkASSERT(aspect == wgpu::TextureAspect::Plane0Only ||
-             aspect == wgpu::TextureAspect::Plane1Only);
+             aspect == wgpu::TextureAspect::Plane1Only ||
+             aspect == wgpu::TextureAspect::Plane2Only);
     wgpu::TextureView planeTextureView;
     wgpu::TextureViewDescriptor planeViewDesc = {};
     planeViewDesc.aspect = aspect;
@@ -183,6 +184,12 @@ sk_sp<Texture> DawnTexture::MakeWrapped(const DawnSharedContext* sharedContext,
 }
 
 void DawnTexture::freeGpuData() {
+    if (this->ownership() != Ownership::kWrapped && fTexture) {
+        // Destroy the texture even if it is still referenced by other BindGroup or views.
+        // Graphite should already guarantee that all command buffers using this texture (indirectly
+        // via BindGroup or views) are already completed.
+        fTexture.Destroy();
+    }
     fTexture = nullptr;
     fSampleTextureView = nullptr;
     fRenderTextureView = nullptr;

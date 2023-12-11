@@ -7,7 +7,8 @@
 
 #include "include/gpu/graphite/BackendTexture.h"
 
-#include "src/gpu/MutableTextureStateRef.h"
+#include "include/gpu/MutableTextureState.h"
+#include "include/gpu/vk/VulkanMutableTextureState.h"
 
 namespace skgpu::graphite {
 
@@ -94,7 +95,7 @@ void BackendTexture::setMutableState(const skgpu::MutableTextureState& newState)
     fMutableState->set(newState);
 }
 
-sk_sp<MutableTextureStateRef> BackendTexture::getMutableState() const {
+sk_sp<MutableTextureState> BackendTexture::getMutableState() const {
     return fMutableState;
 }
 
@@ -111,7 +112,8 @@ BackendTexture::BackendTexture(SkISize planeDimensions,
         : fDimensions(planeDimensions), fInfo(info), fDawnTexture(texture) {
     SkASSERT(info.fAspect == wgpu::TextureAspect::All ||
              info.fAspect == wgpu::TextureAspect::Plane0Only ||
-             info.fAspect == wgpu::TextureAspect::Plane1Only);
+             info.fAspect == wgpu::TextureAspect::Plane1Only ||
+             info.fAspect == wgpu::TextureAspect::Plane2Only);
 }
 
 WGPUTexture BackendTexture::getDawnTexturePtr() const {
@@ -145,7 +147,7 @@ BackendTexture::BackendTexture(SkISize dimensions,
                                VulkanAlloc vulkanMemoryAllocation)
         : fDimensions(dimensions)
         , fInfo(info)
-        , fMutableState(new MutableTextureStateRef(layout, queueFamilyIndex))
+        , fMutableState(sk_make_sp<MutableTextureState>(layout, queueFamilyIndex))
         , fMemoryAlloc(vulkanMemoryAllocation)
         , fVkImage(image) {}
 
@@ -159,7 +161,7 @@ VkImage BackendTexture::getVkImage() const {
 VkImageLayout BackendTexture::getVkImageLayout() const {
     if (this->isValid() && this->backend() == BackendApi::kVulkan) {
         SkASSERT(fMutableState);
-        return fMutableState->getImageLayout();
+        return skgpu::MutableTextureStates::GetVkImageLayout(fMutableState.get());
     }
     return VK_IMAGE_LAYOUT_UNDEFINED;
 }
@@ -167,7 +169,7 @@ VkImageLayout BackendTexture::getVkImageLayout() const {
 uint32_t BackendTexture::getVkQueueFamilyIndex() const {
     if (this->isValid() && this->backend() == BackendApi::kVulkan) {
         SkASSERT(fMutableState);
-        return fMutableState->getQueueFamilyIndex();
+        return skgpu::MutableTextureStates::GetVkQueueFamilyIndex(fMutableState.get());
     }
     return 0;
 }
