@@ -9,6 +9,8 @@
 
 #if defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
 
+#include "include/android/AHardwareBufferUtils.h"
+#include "include/android/GrAHardwareBufferUtils.h"
 #include "include/android/SkSurfaceAndroid.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorSpace.h"
@@ -35,8 +37,6 @@
 #include "src/gpu/SkBackingFit.h"
 #include "src/gpu/SkRenderEngineAbortf.h"
 #include "src/gpu/ganesh/Device.h"
-#include "include/android/GrAHardwareBufferUtils.h"
-#include "src/gpu/android/AHardwareBufferUtils.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrContextThreadSafeProxyPriv.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"

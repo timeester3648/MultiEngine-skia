@@ -5,7 +5,7 @@
  * found in the LICENSE file.
  */
 
-#include "src/gpu/android/AHardwareBufferUtils.h"
+#include "include/android/AHardwareBufferUtils.h"
 
 #if __ANDROID_API__ >= 26
 

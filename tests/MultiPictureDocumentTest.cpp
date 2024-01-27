@@ -174,7 +174,8 @@ DEF_TEST(SkMultiPictureDocument_Serialize_and_deserialize, reporter) {
         auto surf = SkSurfaces::Raster(info);
         surf->getCanvas()->drawPicture(frame.fPicture);
         auto img = surf->makeImageSnapshot();
-        REPORTER_ASSERT(reporter, ToolUtils::equal_pixels(img.get(), expectedImages[i].get()));
+        REPORTER_ASSERT(reporter, ToolUtils::equal_pixels(img.get(), expectedImages[i].get()),
+                        "Frame %d is wrong", i);
 
         i++;
     }
@@ -183,13 +184,13 @@ DEF_TEST(SkMultiPictureDocument_Serialize_and_deserialize, reporter) {
 
 #if defined(SK_GANESH) && defined(SK_BUILD_FOR_ANDROID) && __ANDROID_API__ >= 26
 
+#include "include/android/AHardwareBufferUtils.h"
 #include "include/android/GrAHardwareBufferUtils.h"
 #include "include/core/SkBitmap.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkColorType.h"
 #include "include/gpu/GrDirectContext.h"
 #include "include/gpu/ganesh/SkImageGanesh.h"
-#include "src/gpu/android/AHardwareBufferUtils.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 

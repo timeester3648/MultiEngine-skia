@@ -11,6 +11,7 @@
 
 #include "src/gpu/ganesh/GrAHardwareBufferImageGenerator.h"
 
+#include "include/android/AHardwareBufferUtils.h"
 #include "include/android/GrAHardwareBufferUtils.h"
 #include "include/core/SkColorSpace.h"
 #include "include/gpu/GrBackendSurface.h"
@@ -18,7 +19,6 @@
 #include "include/gpu/GrRecordingContext.h"
 #include "include/gpu/gl/GrGLTypes.h"
 #include "src/core/SkMessageBus.h"
-#include "src/gpu/android/AHardwareBufferUtils.h"
 #include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/gpu/ganesh/GrProxyProvider.h"
