@@ -94,7 +94,7 @@ project "Skia"
 	}
 
 	filter "system:windows"
-		disablewarnings { "4244", "4267", "4291" }
+		disablewarnings { "4244", "4267", "4291", "4806" }
 		defines { "SK_BUILD_FOR_WIN", "_CRT_SECURE_NO_WARNINGS", "WIN32_LEAN_AND_MEAN" }
 		excludes {
 			"./src/**/*posix*",
