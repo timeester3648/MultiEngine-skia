@@ -94,12 +94,12 @@ void main(MultiBuild::Workspace& workspace) {
 	});
 	
 	{
-		MultiBuild::ScopedFilter _(workspace, "project.compiler:VisualCpp");
+		MultiBuild::ScopedFilter _(project, "project.compiler:VisualCpp");
 		properties.disable_warnings({ "4244", "4267", "4291", "4806" });
 	}
 
 	{
-		MultiBuild::ScopedFilter _(workspace, "config.platform:Windows");
+		MultiBuild::ScopedFilter _(project, "config.platform:Windows");
 		properties.defines({ "SK_BUILD_FOR_WIN", "_CRT_SECURE_NO_WARNINGS", "WIN32_LEAN_AND_MEAN" });
 		properties.excluded_files({ 
 			"./src/**/*posix*",
@@ -108,7 +108,7 @@ void main(MultiBuild::Workspace& workspace) {
 	}
 
 	{
-		MultiBuild::ScopedFilter _(workspace, "config.platform:MacOS");
+		MultiBuild::ScopedFilter _(project, "config.platform:MacOS");
 		properties.defines("SK_BUILD_FOR_MAC");
 		properties.excluded_files("./src/**/*ImageGeneratorWIC*");
 	}
