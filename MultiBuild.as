@@ -83,13 +83,13 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/ports/*SkFontMgr_custom_embedded_factory*",
 		"./src/ports/*SkFontMgr_custom_directory_factory*",
 
-		"./src/**/*dawn*",
-		"./src/**/*vello*",
-		"./src/**/*fuchsia*",
-		"./src/**/*android*",
-		"./src/**/*fontations*",
-		"./src/**/*fontconfig*",
-		"./src/**/*libjpegturbo*",
+		"./src/**/*dawn*/**",
+		"./src/**/*vello*/**",
+		"./src/**/*fuchsia*/**",
+		"./src/**/*android*/**",
+		"./src/**/*fontations*/**",
+		"./src/**/*fontconfig*/**",
+		"./src/**/*libjpegturbo*/**",
 
 		"./src/xml/**",
 
