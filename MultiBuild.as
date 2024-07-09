@@ -79,9 +79,9 @@ void main(MultiBuild::Workspace& workspace) {
 
 		"./src/ports/*NDK*",
 		"./src/ports/*SkFontMgr_win*",
-		"./src/ports/*SkFontMgr_custom_empty_factory*",
-		"./src/ports/*SkFontMgr_custom_embedded_factory*",
-		"./src/ports/*SkFontMgr_custom_directory_factory*",
+		"./src/ports/*SkFontMgr_custom_empty*",
+		"./src/ports/*SkFontMgr_custom_embedded*",
+		"./src/ports/*SkFontMgr_custom_directory*",
 
 		"./src/**/*dawn*/**",
 		"./src/**/*vello*/**",
