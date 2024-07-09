@@ -91,6 +91,14 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/**/*fontconfig*/**",
 		"./src/**/*libjpegturbo*/**",
 
+		"./src/**/*dawn*",
+		"./src/**/*vello*",
+		"./src/**/*fuchsia*",
+		"./src/**/*android*",
+		"./src/**/*fontations*",
+		"./src/**/*fontconfig*",
+		"./src/**/*libjpegturbo*",
+
 		"./src/xml/**",
 
 		"./src/gpu/vk/vulkanmemoryallocator/VulkanMemoryAllocatorWrapper.cpp"
