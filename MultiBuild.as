@@ -68,6 +68,8 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/codec/*Jpeg*",
 		"./src/codec/*Avif*",
 		"./src/codec/*Wuffs*",
+
+		"./src/gpu/graphite/compute/*Vello*",
 		
 		"./src/encode/*SkPngEncoderImpl*",
 		"./src/encode/*SkJpegEncoderImpl*",
@@ -81,7 +83,7 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/ports/*SkFontMgr_win*",
 		"./src/ports/*empty*",
 		"./src/ports/*embedded*",
-		"./src/ports/*directory*",
+		"./src/ports/*direct*",
 
 		"./src/**/*dawn*/**",
 		"./src/**/*vello*/**",
