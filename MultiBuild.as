@@ -51,7 +51,10 @@ void main(MultiBuild::Workspace& workspace) {
 		"SKIA_IMPLEMENTATION=1"
 	});
 
-	properties.include_directories("./src/gpu/vk/vulkanmemoryallocator/");
+	properties.include_directories({
+		".",
+		"./src/gpu/vk/vulkanmemoryallocator/"
+	});
 
 	properties.excluded_files({
 		"./src/**/ganesh/gl/**",
