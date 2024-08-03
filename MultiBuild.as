@@ -48,6 +48,8 @@ void main(MultiBuild::Workspace& workspace) {
 		"SK_TYPEFACE_FACTORY_FREETYPE",
 		"SK_FREETYPE_MINIMUM_RUNTIME_VERSION_IS_BUILD_VERSION",
 
+		"SK_PDF_USE_HARFBUZZ_SUBSET",
+
 		"SKIA_IMPLEMENTATION=1"
 	});
 
@@ -70,6 +72,7 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/codec/*Wuffs*",
 
 		"./src/sksl/codegen/*WGSL*",
+		"./src/sksl/SkSLModuleDataFile.cpp",
 
 		"./src/gpu/graphite/compute/*Vello*",
 		
