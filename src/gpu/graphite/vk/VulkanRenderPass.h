@@ -11,11 +11,12 @@
 #include "src/gpu/graphite/Resource.h"
 
 #include "include/private/base/SkTArray.h"
-#include "src/gpu/graphite/AttachmentTypes.h"
 #include "src/gpu/graphite/vk/VulkanCommandBuffer.h"
 
 namespace skgpu::graphite {
 
+struct AttachmentDesc;
+struct RenderPassDesc;
 class VulkanCommandBuffer;
 class VulkanSharedContext;
 
@@ -34,6 +35,14 @@ const static VkAttachmentLoadOp vkLoadOp[] {
 */
 class VulkanRenderPass : public Resource {
 public:
+    // Statically assign attachment indices until such information can be fetched from
+    // graphite-level structures (likely RenderPassDesc)
+    static constexpr int kColorAttachmentIdx = 0;
+    static constexpr int kColorResolveAttachmentIdx = 1;
+    static constexpr int kDepthStencilAttachmentIdx = 2;
+
+    static constexpr int kMaxExpectedAttachmentCount = kDepthStencilAttachmentIdx + 1;
+
     // Methods to create compatible (needed when creating a framebuffer and graphics pipeline) or
     // full (needed when beginning a render pass from the command buffer) render passes and keys.
     static GraphiteResourceKey MakeRenderPassKey(const RenderPassDesc&, bool compatibleOnly);

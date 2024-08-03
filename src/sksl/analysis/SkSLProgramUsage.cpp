@@ -11,7 +11,7 @@
 #include "src/base/SkEnumBitMask.h"
 #include "src/core/SkTHash.h"
 #include "src/sksl/SkSLAnalysis.h"
-#include "src/sksl/SkSLCompiler.h"
+#include "src/sksl/SkSLModule.h"
 #include "src/sksl/analysis/SkSLProgramUsage.h"
 #include "src/sksl/analysis/SkSLProgramVisitor.h"
 #include "src/sksl/ir/SkSLExpression.h"
@@ -22,6 +22,7 @@
 #include "src/sksl/ir/SkSLModifierFlags.h"
 #include "src/sksl/ir/SkSLProgramElement.h"
 #include "src/sksl/ir/SkSLStatement.h"
+#include "src/sksl/ir/SkSLStructDefinition.h"
 #include "src/sksl/ir/SkSLSymbol.h"
 #include "src/sksl/ir/SkSLType.h"
 #include "src/sksl/ir/SkSLVarDeclarations.h"
@@ -60,6 +61,9 @@ public:
             fUsage->fVariableCounts[var];
 
             this->visitType(var->type());
+        } else if (pe.is<StructDefinition>()) {
+            // Ensure that structs referenced as nested types in other structs are counted as used.
+            this->visitStructFields(pe.as<StructDefinition>().type());
         }
         return INHERITED::visitProgramElement(pe);
     }
@@ -118,9 +122,13 @@ public:
             structCount += fDelta;
             SkASSERT(structCount >= 0);
 
-            for (const Field& f : t.fields()) {
-                this->visitType(*f.fType);
-            }
+            this->visitStructFields(t);
+        }
+    }
+
+    void visitStructFields(const Type& t) {
+        for (const Field& f : t.fields()) {
+            this->visitType(*f.fType);
         }
     }
 

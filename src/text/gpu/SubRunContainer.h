@@ -63,6 +63,7 @@ using RegenerateAtlasDelegate = std::function<std::tuple<bool, int>(GlyphVector*
 struct RendererData {
     bool isSDF = false;
     bool isLCD = false;
+    skgpu::MaskFormat maskFormat;
 };
 
 // -- AtlasSubRun --------------------------------------------------------------------------------
@@ -243,7 +244,7 @@ public:
     bool canReuse(const SkPaint& paint, const SkMatrix& positionMatrix) const;
 
 private:
-    friend struct SubRunContainerPeer;
+    friend class TextBlobTools;
     const SkMatrix fInitialPositionMatrix;
     SubRunList fSubRuns;
 };

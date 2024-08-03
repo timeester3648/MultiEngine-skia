@@ -5,16 +5,28 @@
  * found in the LICENSE file.
  */
 
-#include "include/core/SkPaint.h"
 #include "src/core/SkScalerContext.h"
 
+#include "include/core/SkColorType.h"
 #include "include/core/SkDrawable.h"
+#include "include/core/SkFont.h"
 #include "include/core/SkFontMetrics.h"
+#include "include/core/SkImageInfo.h"
 #include "include/core/SkMaskFilter.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
 #include "include/core/SkPathEffect.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkStrokeRec.h"
 #include "include/private/SkColorData.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkCPUTypes.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkFixed.h"
+#include "include/private/base/SkMalloc.h"
+#include "include/private/base/SkMutex.h"
 #include "include/private/base/SkTo.h"
+#include "src/base/SkArenaAlloc.h"
 #include "src/base/SkAutoMalloc.h"
 #include "src/core/SkAutoPixmapStorage.h"
 #include "src/core/SkBlitter_A8.h"
@@ -22,17 +34,16 @@
 #include "src/core/SkDrawBase.h"
 #include "src/core/SkFontPriv.h"
 #include "src/core/SkGlyph.h"
-#include "src/core/SkMaskGamma.h"
+#include "src/core/SkMaskFilterBase.h"
 #include "src/core/SkPaintPriv.h"
-#include "src/core/SkPathPriv.h"
 #include "src/core/SkRasterClip.h"
-#include "src/core/SkReadBuffer.h"
-#include "src/core/SkRectPriv.h"
-#include "src/core/SkStroke.h"
-#include "src/core/SkSurfacePriv.h"
 #include "src/core/SkTextFormatParams.h"
 #include "src/core/SkWriteBuffer.h"
 #include "src/utils/SkMatrix22.h"
+
+#include <algorithm>
+#include <cstring>
+#include <limits>
 #include <new>
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -86,7 +97,7 @@ SkScalerContext::SkScalerContext(sk_sp<SkTypeface> typeface, const SkScalerConte
     , fPreBlend(fMaskFilter ? SkMaskGamma::PreBlend() : SkScalerContext::GetMaskPreBlend(fRec))
 {
     if constexpr (kSkScalerContextDumpRec) {
-        SkDebugf("SkScalerContext checksum %x count %d length %d\n",
+        SkDebugf("SkScalerContext checksum %x count %u length %u\n",
                  desc->getChecksum(), desc->getCount(), desc->getLength());
         SkDebugf("%s", fRec.dump().c_str());
         SkDebugf("  effects %p\n", desc->findEntry(kEffects_SkDescriptorTag, nullptr));
@@ -106,54 +117,63 @@ static SkMutex& mask_gamma_cache_mutex() {
 }
 
 static SkMaskGamma* gLinearMaskGamma = nullptr;
+static SkMaskGamma* gDefaultMaskGamma = nullptr;
 static SkMaskGamma* gMaskGamma = nullptr;
-static SkScalar gContrast = SK_ScalarMin;
-static SkScalar gPaintGamma = SK_ScalarMin;
-static SkScalar gDeviceGamma = SK_ScalarMin;
+static uint8_t gContrast = 0;
+static uint8_t gGamma = 0;
 
 /**
  * The caller must hold the mask_gamma_cache_mutex() and continue to hold it until
  * the returned SkMaskGamma pointer is refed or forgotten.
  */
-static const SkMaskGamma& cached_mask_gamma(SkScalar contrast, SkScalar paintGamma,
-                                            SkScalar deviceGamma) {
+const SkMaskGamma& SkScalerContextRec::CachedMaskGamma(uint8_t contrast, uint8_t gamma) {
     mask_gamma_cache_mutex().assertHeld();
-    if (0 == contrast && SK_Scalar1 == paintGamma && SK_Scalar1 == deviceGamma) {
+
+    constexpr uint8_t contrast0 = InternalContrastFromExternal(0);
+    constexpr uint8_t gamma1 = InternalGammaFromExternal(1);
+    if (contrast0 == contrast && gamma1 == gamma) {
         if (nullptr == gLinearMaskGamma) {
             gLinearMaskGamma = new SkMaskGamma;
         }
         return *gLinearMaskGamma;
     }
-    if (gContrast != contrast || gPaintGamma != paintGamma || gDeviceGamma != deviceGamma) {
+    constexpr uint8_t defaultContrast = InternalContrastFromExternal(SK_GAMMA_CONTRAST);
+    constexpr uint8_t defaultGamma = InternalGammaFromExternal(SK_GAMMA_EXPONENT);
+    if (defaultContrast == contrast && defaultGamma == gamma) {
+        if (!gDefaultMaskGamma) {
+            gDefaultMaskGamma = new SkMaskGamma(ExternalContrastFromInternal(contrast),
+                                                ExternalGammaFromInternal(gamma));
+        }
+        return *gDefaultMaskGamma;
+    }
+    if (!gMaskGamma || gContrast != contrast || gGamma != gamma) {
         SkSafeUnref(gMaskGamma);
-        gMaskGamma = new SkMaskGamma(contrast, paintGamma, deviceGamma);
+        gMaskGamma = new SkMaskGamma(ExternalContrastFromInternal(contrast),
+                                     ExternalGammaFromInternal(gamma));
         gContrast = contrast;
-        gPaintGamma = paintGamma;
-        gDeviceGamma = deviceGamma;
+        gGamma = gamma;
     }
     return *gMaskGamma;
 }
 
 /**
- * Expands fDeviceGamma, fPaintGamma, fContrast, and fLumBits into a mask pre-blend.
+ * Expands fDeviceGamma, fContrast, and fLumBits into a mask pre-blend.
  */
 SkMaskGamma::PreBlend SkScalerContext::GetMaskPreBlend(const SkScalerContextRec& rec) {
     SkAutoMutexExclusive ama(mask_gamma_cache_mutex());
 
-    const SkMaskGamma& maskGamma = cached_mask_gamma(rec.getContrast(),
-                                                     rec.getPaintGamma(),
-                                                     rec.getDeviceGamma());
+    const SkMaskGamma& maskGamma = rec.cachedMaskGamma();
 
     // TODO: remove CanonicalColor when we to fix up Chrome layout tests.
     return maskGamma.preBlend(rec.getLuminanceColor());
 }
 
-size_t SkScalerContext::GetGammaLUTSize(SkScalar contrast, SkScalar paintGamma,
-                                        SkScalar deviceGamma, int* width, int* height) {
+size_t SkScalerContext::GetGammaLUTSize(SkScalar contrast, SkScalar deviceGamma,
+                                        int* width, int* height) {
     SkAutoMutexExclusive ama(mask_gamma_cache_mutex());
-    const SkMaskGamma& maskGamma = cached_mask_gamma(contrast,
-                                                     paintGamma,
-                                                     deviceGamma);
+    const SkMaskGamma& maskGamma = SkScalerContextRec::CachedMaskGamma(
+            SkScalerContextRec::InternalContrastFromExternal(contrast),
+            SkScalerContextRec::InternalGammaFromExternal(deviceGamma));
 
     maskGamma.getGammaTableDimensions(width, height);
     size_t size = (*width)*(*height)*sizeof(uint8_t);
@@ -161,12 +181,11 @@ size_t SkScalerContext::GetGammaLUTSize(SkScalar contrast, SkScalar paintGamma,
     return size;
 }
 
-bool SkScalerContext::GetGammaLUTData(SkScalar contrast, SkScalar paintGamma, SkScalar deviceGamma,
-                                      uint8_t* data) {
+bool SkScalerContext::GetGammaLUTData(SkScalar contrast, SkScalar deviceGamma, uint8_t* data) {
     SkAutoMutexExclusive ama(mask_gamma_cache_mutex());
-    const SkMaskGamma& maskGamma = cached_mask_gamma(contrast,
-                                                     paintGamma,
-                                                     deviceGamma);
+    const SkMaskGamma& maskGamma = SkScalerContextRec::CachedMaskGamma(
+            SkScalerContextRec::InternalContrastFromExternal(contrast),
+            SkScalerContextRec::InternalGammaFromExternal(deviceGamma));
     const uint8_t* gammaTables = maskGamma.getGammaTables();
     if (!gammaTables) {
         return false;
@@ -1163,13 +1182,13 @@ void SkScalerContext::MakeRecAndEffects(const SkFont& font, const SkPaint& paint
     rec->setHinting(font.getHinting());
     rec->setLuminanceColor(SkPaintPriv::ComputeLuminanceColor(paint));
 
-    // For now always set the paint gamma equal to the device gamma.
+    // The paint color is always converted to the device colr space,
+    // so the paint gamma is now always equal to the device gamma.
     // The math in SkMaskGamma can handle them being different,
     // but it requires superluminous masks when
     // Ex : deviceGamma(x) < paintGamma(x) and x is sufficiently large.
-    rec->setDeviceGamma(SK_GAMMA_EXPONENT);
-    rec->setPaintGamma(SK_GAMMA_EXPONENT);
-    rec->setContrast(SK_GAMMA_CONTRAST);
+    rec->setDeviceGamma(surfaceProps.textGamma());
+    rec->setContrast(surfaceProps.textContrast());
 
     if (!SkToBool(scalerContextFlags & SkScalerContextFlags::kFakeGamma)) {
         rec->ignoreGamma();

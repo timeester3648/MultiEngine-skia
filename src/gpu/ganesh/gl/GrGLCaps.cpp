@@ -18,6 +18,7 @@
 #include "include/gpu/ganesh/gl/GrGLBackendSurface.h"
 #include "include/gpu/gl/GrGLFunctions.h"
 #include "include/gpu/gl/GrGLInterface.h"
+#include "include/private/base/SkDebug.h"
 #include "include/private/base/SkMath.h"
 #include "include/private/base/SkTemplates.h"
 #include "include/private/base/SkTo.h"
@@ -992,8 +993,13 @@ void GrGLCaps::initGLSL(const GrGLContextInfo& ctxInfo, const GrGLInterface* gli
     // Flat interpolation appears to be slow on Qualcomm GPUs (tested Adreno 405 and 530).
     // Avoid on ANGLE too, it inserts a geometry shader into the pipeline to implement flat interp.
     // Is this only true on ANGLE's D3D backends or also on the GL backend?
-    // Flat interpolation is slow with ANGLE's Metal backend.
-    shaderCaps->fPreferFlatInterpolation = shaderCaps->fFlatInterpolationSupport &&
+    // Flat interpolation is slow with ANGLE's Metal backend and uses memory to rewrite index
+    // buffers to support GL's provoking vertex semantics.
+    // Never prefer flat shading on WebGL. GPU detection isn't as robust (e.g.
+    // WEBGL_debug_renderer_info may not be enabled and strings may be masked), the perf benefits
+    // are minimal, and potential cost is high (e.g. on ANGLE Metal backend).
+    shaderCaps->fPreferFlatInterpolation = !GR_IS_GR_WEBGL(standard) &&
+                                           shaderCaps->fFlatInterpolationSupport &&
                                            ctxInfo.vendor() != GrGLVendor::kQualcomm &&
                                            !angle_backend_is_d3d(ctxInfo.angleBackend()) &&
                                            !angle_backend_is_metal(ctxInfo.angleBackend());
@@ -1057,6 +1063,15 @@ void GrGLCaps::initGLSL(const GrGLContextInfo& ctxInfo, const GrGLInterface* gli
     // required to actually identify infinite values. (GPUs are not required to _produce_ infinite
     // values via operations like `num / 0.0` until GLSL 4.1.)
     shaderCaps->fInfinitySupport = (ctxInfo.glslGeneration() >= SkSL::GLSLGeneration::k330);
+
+    // Using isinf or isnan with ANGLE will disable fast-math (which is a good thing!), but that
+    // leads to hangs in the Metal shader compiler service for some of our tessellation shaders,
+    // running on Intel Macs. For now, pretend that we don't have infinity support, even when we're
+    // targeting ANGLE's ES3 to Metal.
+    if (ctxInfo.angleBackend() == GrGLANGLEBackend::kMetal &&
+        ctxInfo.angleVendor() == GrGLVendor::kIntel) {
+        shaderCaps->fInfinitySupport = false;
+    }
 
     if (GR_IS_GR_GL(standard)) {
         shaderCaps->fNonconstantArrayIndexSupport = true;
@@ -4289,6 +4304,7 @@ void GrGLCaps::applyDriverCorrectnessWorkarounds(const GrGLContextInfo& ctxInfo,
         ctxInfo.renderer() == GrGLRenderer::kAdreno530       ||
         ctxInfo.renderer() == GrGLRenderer::kAdreno5xx_other ||
         ctxInfo.driver()   == GrGLDriver::kIntel             ||
+        ctxInfo.angleVendor() == GrGLVendor::kIntel          ||
         ctxInfo.isOverCommandBuffer()                        ||
         ctxInfo.vendor()   == GrGLVendor::kARM /* http://skbug.com/11906 */) {
         fBlendEquationSupport = kBasic_BlendEquationSupport;
@@ -4296,8 +4312,11 @@ void GrGLCaps::applyDriverCorrectnessWorkarounds(const GrGLContextInfo& ctxInfo,
     }
 
     // Non-coherent advanced blend has an issue on NVIDIA pre 337.00.
-    if (ctxInfo.driver() == GrGLDriver::kNVIDIA &&
-        ctxInfo.driverVersion() < GR_GL_DRIVER_VER(337, 00, 0) &&
+    if (((ctxInfo.driver() == GrGLDriver::kNVIDIA &&
+          ctxInfo.driverVersion() < GR_GL_DRIVER_VER(337, 00, 0)) ||
+         (ctxInfo.angleBackend() == GrGLANGLEBackend::kOpenGL &&
+          ctxInfo.angleDriver() == GrGLDriver::kNVIDIA &&
+          ctxInfo.angleDriverVersion() < GR_GL_DRIVER_VER(337, 00, 0))) &&
         kAdvanced_BlendEquationSupport == fBlendEquationSupport) {
         fBlendEquationSupport = kBasic_BlendEquationSupport;
         shaderCaps->fAdvBlendEqInteraction = GrShaderCaps::kNotSupported_AdvBlendEqInteraction;
@@ -4309,11 +4328,14 @@ void GrGLCaps::applyDriverCorrectnessWorkarounds(const GrGLContextInfo& ctxInfo,
     }
 
     if (this->advancedBlendEquationSupport()) {
-        if (ctxInfo.driver() == GrGLDriver::kNVIDIA &&
-            ctxInfo.driverVersion() < GR_GL_DRIVER_VER(355, 00, 0)) {
+        if ((ctxInfo.driver() == GrGLDriver::kNVIDIA &&
+             ctxInfo.driverVersion() < GR_GL_DRIVER_VER(355, 00, 0)) ||
+            (ctxInfo.angleBackend() == GrGLANGLEBackend::kOpenGL &&
+             ctxInfo.angleDriver() == GrGLDriver::kNVIDIA &&
+             ctxInfo.angleDriverVersion() < GR_GL_DRIVER_VER(355, 00, 0))) {
             // Disable color-dodge and color-burn on pre-355.00 NVIDIA.
             fAdvBlendEqDisableFlags |= (1 << static_cast<int>(skgpu::BlendEquation::kColorDodge)) |
-                                    (1 << static_cast<int>(skgpu::BlendEquation::kColorBurn));
+                                       (1 << static_cast<int>(skgpu::BlendEquation::kColorBurn));
         }
         if (ctxInfo.vendor() == GrGLVendor::kARM) {
             // Disable color-burn on ARM until the fix is released.
@@ -4652,15 +4674,6 @@ void GrGLCaps::applyDriverCorrectnessWorkarounds(const GrGLContextInfo& ctxInfo,
     if (ctxInfo.renderer()       == GrGLRenderer::kWebGL &&
         (ctxInfo.webglRenderer() == GrGLRenderer::kAdreno4xx_other ||
          ctxInfo.webglRenderer() == GrGLRenderer::kAdreno630)) {
-        fFlushBeforeWritePixels = true;
-    }
-    // b/269561251
-    // PowerVR B-Series over ANGLE and passthrough command decoder has similar text atlas glitches
-    // to those seen on Adreno WebGL on the validating decoder (notably that case was fine on
-    // the passthrough decoder). Directly running on the device works correctly, so see if this
-    // around avoids the issue.
-    if (ctxInfo.angleBackend() != GrGLANGLEBackend::kUnknown &&
-        ctxInfo.angleRenderer() == GrGLRenderer::kPowerVRBSeries) {
         fFlushBeforeWritePixels = true;
     }
     // crbug.com/1395777

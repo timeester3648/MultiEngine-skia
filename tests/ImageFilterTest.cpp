@@ -101,7 +101,10 @@ public:
     MatrixTestImageFilter(skiatest::Reporter* reporter, const SkMatrix& expectedMatrix)
             : SkImageFilter_Base(nullptr, 0)
             , fReporter(reporter)
-            , fExpectedMatrix(expectedMatrix) {}
+            , fExpectedMatrix(expectedMatrix) {
+        // Layers have an extra pixel of padding that adjusts the coordinate space
+        fExpectedMatrix.postTranslate(1.f, 1.f);
+    }
 
 private:
     Factory getFactory() const override {
@@ -1898,7 +1901,7 @@ DEF_GANESH_TEST_FOR_RENDERING_CONTEXTS(ImageFilterMakeWithFilter_Ganesh,
 DEF_GRAPHITE_TEST_FOR_RENDERING_CONTEXTS(ImageFilterMakeWithFilter_Graphite,
                                          reporter,
                                          context,
-                                         CtsEnforcement::kNextRelease) {
+                                         CtsEnforcement::kApiLevel_V) {
     std::unique_ptr<skgpu::graphite::Recorder> recorder =
             context->makeRecorder(ToolUtils::CreateTestingRecorderOptions());
 

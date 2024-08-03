@@ -7,6 +7,8 @@
 
 #include "src/gpu/graphite/vk/VulkanRenderPass.h"
 
+#include "include/gpu/graphite/vk/VulkanGraphiteTypes.h"
+#include "src/gpu/graphite/RenderPassDesc.h"
 #include "src/gpu/graphite/Texture.h"
 #include "src/gpu/graphite/vk/VulkanCommandBuffer.h"
 #include "src/gpu/graphite/vk/VulkanGraphiteUtilsPriv.h"
@@ -50,7 +52,7 @@ void add_attachment_description_info_to_key(ResourceKey::Builder& builder,
                                             LoadOp loadOp,
                                             StoreOp storeOp) {
     VulkanTextureInfo vkTexInfo;
-    if (textureInfo.isValid() && textureInfo.getVulkanTextureInfo(&vkTexInfo)) {
+    if (textureInfo.isValid() && TextureInfos::GetVulkanTextureInfo(textureInfo, &vkTexInfo)) {
         builder[builderIdx++] = vkTexInfo.fFormat;
         builder[builderIdx++] = vkTexInfo.fSampleCount;
         SkASSERT(sizeof(loadOp)  < (1u << 8));
@@ -72,15 +74,6 @@ void add_subpass_info_to_key(ResourceKey::Builder& builder,
                              bool loadMSAAFromResolve,
                              int subpassCount,
                              int subpassDependencyCount) {
-    // The following assumes that we only have up to one reference of each type per subpass and
-    // that attachments are indexed in order of color, resolve, depth/stencil, then input
-    // attachments. Enforce this via static variables.
-    static constexpr int kColorAttachmentIdx = 0;
-    static constexpr int kColorResolveAttachmentIdx = 1;
-    static constexpr int kDepthStencilAttachmentIdx = 2;
-    // TODO: Add index variable for main subpass input attachment once supported.
-    static constexpr int kLoadSubpassInputAttachmentIdx = kColorResolveAttachmentIdx;
-
     // TODO: Fetch actual attachment reference and index information for each
     // subpass from RenderPassDesc. For now, determine subpass data based upon whether we are
     // loading from MSAA or not.
@@ -88,24 +81,32 @@ void add_subpass_info_to_key(ResourceKey::Builder& builder,
     // Assign a smaller value to represent VK_ATTACHMENT_UNUSED.
     static constexpr int kAttachmentUnused = std::numeric_limits<uint8_t>::max();
 
+    // The following key structure assumes that we only have up to one reference of each type per
+    // subpass and that attachments are indexed in order of color, resolve, depth/stencil, then
+    // input attachments. These indices are statically defined in the VulkanRenderPass header file.
     for (int j = 0; j < subpassCount; j++) {
         if (j == mainSubpassIdx) {
             uint32_t attachmentIdxKeyInfo;
-            attachmentIdxKeyInfo = hasColorAttachment ? kColorAttachmentIdx : kAttachmentUnused;
-            attachmentIdxKeyInfo |= (hasColorResolveAttachment ? kColorResolveAttachmentIdx
-                                                               : kAttachmentUnused) << 8;
-            attachmentIdxKeyInfo |= (hasDepthStencilAttachment ? kDepthStencilAttachmentIdx
-                                                               : kAttachmentUnused) << 16;
+            attachmentIdxKeyInfo = hasColorAttachment ? VulkanRenderPass::kColorAttachmentIdx
+                                                      : kAttachmentUnused;
+            attachmentIdxKeyInfo |=
+                    (hasColorResolveAttachment ? VulkanRenderPass::kColorResolveAttachmentIdx
+                                               : kAttachmentUnused) << 8;
+            attachmentIdxKeyInfo |=
+                    (hasDepthStencilAttachment ? VulkanRenderPass::kDepthStencilAttachmentIdx
+                                               : kAttachmentUnused) << 16;
             // TODO: Add input attachment info to key once supported for use in main subpass
             attachmentIdxKeyInfo |= kAttachmentUnused << 24;
 
             builder[builderIdx++] = attachmentIdxKeyInfo;
         } else { // Loading MSAA from resolve subpass
             SkASSERT(hasColorAttachment);
-            builder[builderIdx++] = kColorAttachmentIdx |  // color attachment
-                                    (kAttachmentUnused << 8) | // No color resolve attachment
-                                    (kAttachmentUnused << 16) | // No depth/stencil attachment
-                                    (kLoadSubpassInputAttachmentIdx << 24); // input attachment
+            builder[builderIdx++] =
+                    VulkanRenderPass::kColorAttachmentIdx | // color attachment
+                    (kAttachmentUnused << 8)              | // No color resolve attachment
+                    (kAttachmentUnused << 16)             | // No depth/stencil attachment
+                    // The input attachment for the load subpass is the color resolve texture.
+                    (VulkanRenderPass::kColorResolveAttachmentIdx << 24);
         }
     }
 
@@ -158,7 +159,7 @@ void populate_key(VulkanRenderPass::VulkanRenderPassMetaData& rpMetaData,
 VulkanRenderPass::VulkanRenderPassMetaData::VulkanRenderPassMetaData(
         const RenderPassDesc& renderPassDesc) {
     fLoadMSAAFromResolve = renderPassDesc.fColorResolveAttachment.fTextureInfo.isValid() &&
-                            renderPassDesc.fColorResolveAttachment.fLoadOp == LoadOp::kLoad;
+                           renderPassDesc.fColorResolveAttachment.fLoadOp == LoadOp::kLoad;
     fHasColorAttachment        = renderPassDesc.fColorAttachment.fTextureInfo.isValid();
     fHasColorResolveAttachment =
             renderPassDesc.fColorResolveAttachment.fTextureInfo.isValid();
@@ -289,14 +290,11 @@ sk_sp<VulkanRenderPass> VulkanRenderPass::MakeRenderPass(const VulkanSharedConte
     VkAttachmentReference resolveLoadInputRef;
     VkAttachmentReference depthStencilRef;
 
-    // TODO: Assign real value to loadMSAAFromResolve according to whether the resolve
-    // attachment's load op is LoadOp::kLoad. Keeping as false until all the plumbing is hooked
-    // up.
     bool loadMSAAFromResolve = false;
-
     if (hasColorAttachment) {
         VulkanTextureInfo colorAttachTexInfo;
-        colorAttachmentTextureInfo.getVulkanTextureInfo(&colorAttachTexInfo);
+        SkAssertResult(TextureInfos::GetVulkanTextureInfo(colorAttachmentTextureInfo,
+                                                          &colorAttachTexInfo));
         auto& colorAttachDesc = renderPassDesc.fColorAttachment;
 
         colorRef.attachment = attachmentDescs.size();
@@ -313,9 +311,11 @@ sk_sp<VulkanRenderPass> VulkanRenderPass::MakeRenderPass(const VulkanSharedConte
         colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         if (hasColorResolveAttachment) {
+            loadMSAAFromResolve = renderPassDesc.fColorResolveAttachment.fLoadOp == LoadOp::kLoad;
             SkASSERT(renderPassDesc.fColorResolveAttachment.fStoreOp == StoreOp::kStore);
             VulkanTextureInfo resolveAttachTexInfo;
-            colorResolveAttachmentTextureInfo.getVulkanTextureInfo(&resolveAttachTexInfo);
+            SkAssertResult(TextureInfos::GetVulkanTextureInfo(colorResolveAttachmentTextureInfo,
+                                                              &resolveAttachTexInfo));
             auto& resolveAttachDesc = renderPassDesc.fColorResolveAttachment;
 
             resolveRef.attachment = attachmentDescs.size();
@@ -327,7 +327,8 @@ sk_sp<VulkanRenderPass> VulkanRenderPass::MakeRenderPass(const VulkanSharedConte
                     resolveAttachDesc,
                     compatibleOnly ? LoadOp::kDiscard  : resolveAttachDesc.fLoadOp,
                     compatibleOnly ? StoreOp::kDiscard : resolveAttachDesc.fStoreOp,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    loadMSAAFromResolve ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                        : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
             resolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         } else {
@@ -344,7 +345,8 @@ sk_sp<VulkanRenderPass> VulkanRenderPass::MakeRenderPass(const VulkanSharedConte
 
     if (hasDepthStencilAttachment) {
         VulkanTextureInfo depthStencilTexInfo;
-        depthStencilAttachmentTextureInfo.getVulkanTextureInfo(&depthStencilTexInfo);
+        SkAssertResult(TextureInfos::GetVulkanTextureInfo(depthStencilAttachmentTextureInfo,
+                                                          &depthStencilTexInfo));
         auto& depthStencilAttachDesc = renderPassDesc.fDepthStencilAttachment;
 
         depthStencilRef.attachment = attachmentDescs.size();
@@ -425,10 +427,9 @@ sk_sp<VulkanRenderPass> VulkanRenderPass::MakeRenderPass(const VulkanSharedConte
     renderPassInfo.pAttachments = attachmentDescs.begin();
 
     VkResult result;
-    VULKAN_CALL_RESULT(context->interface(), result, CreateRenderPass(context->device(),
-                                                                      &renderPassInfo,
-                                                                      nullptr,
-                                                                      &renderPass));
+    VULKAN_CALL_RESULT(context,
+                       result,
+                       CreateRenderPass(context->device(), &renderPassInfo, nullptr, &renderPass));
     if (result != VK_SUCCESS) {
         return nullptr;
     }
@@ -445,12 +446,10 @@ VulkanRenderPass::VulkanRenderPass(const VulkanSharedContext* context,
         : Resource(context,
                    Ownership::kOwned,
                    skgpu::Budgeted::kYes,
-                   /*gpuMemorySize=*/0,
-                   /*label=*/"VulkanRenderPass")
+                   /*gpuMemorySize=*/0)
         , fSharedContext(context)
-        , fRenderPass (renderPass)
-        , fGranularity (granularity) {
-}
+        , fRenderPass(renderPass)
+        , fGranularity(granularity) {}
 
 void VulkanRenderPass::freeGpuData() {
     VULKAN_CALL(fSharedContext->interface(),

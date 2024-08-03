@@ -7,12 +7,16 @@
 
 #include "include/codec/SkCodec.h"
 #include "include/codec/SkEncodedOrigin.h"
+#include "include/codec/SkWebpDecoder.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkSize.h"
 #include "include/core/SkStream.h"
 #include "include/private/SkExif.h"
 #include "tests/Test.h"
 #include "tools/Resources.h"
 
 #include <memory>
+#include <tuple>
 #include <utility>
 
 DEF_TEST(ExifOrientation, r) {
@@ -31,6 +35,29 @@ DEF_TEST(ExifOrientation, r) {
     REPORTER_ASSERT(r, nullptr != codec);
     origin = codec->getOrigin();
     REPORTER_ASSERT(r, kTopLeft_SkEncodedOrigin == origin);
+}
+
+DEF_TEST(GetImageRespectsExif, r) {
+    std::unique_ptr<SkStream> stream(GetResourceAsStream("images/orientation/6.webp"));
+    REPORTER_ASSERT(r, nullptr != stream);
+    if (!stream) {
+        return;
+    }
+
+    std::unique_ptr<SkCodec> codec(SkWebpDecoder::Decode(std::move(stream), nullptr));
+    REPORTER_ASSERT(r, nullptr != codec);
+    SkEncodedOrigin origin = codec->getOrigin();
+    REPORTER_ASSERT(r, kRightTop_SkEncodedOrigin == origin,
+                    "Actual origin %d", origin);
+
+    auto result = codec->getImage();
+    REPORTER_ASSERT(r, std::get<1>(result) == SkCodec::Result::kSuccess,
+                    "Not success %d", std::get<1>(result));
+    sk_sp<SkImage> frame = std::get<0>(result);
+    REPORTER_ASSERT(r, frame);
+    SkISize dims = frame->dimensions();
+    REPORTER_ASSERT(r, dims.fWidth == 100, "width %d != 100", dims.fWidth);
+    REPORTER_ASSERT(r, dims.fHeight == 80, "height %d != 80", dims.fHeight);
 }
 
 DEF_TEST(ExifOrientationInExif, r) {
@@ -59,100 +86,80 @@ DEF_TEST(ExifParse, r) {
     {
         sk_sp<SkData> data = GetResourceAsData("images/test0-hdr.exif");
         REPORTER_ASSERT(r, nullptr != data);
-        SkExifMetadata exif(data);
-        float hdrHeadroom = 0.f;
-        REPORTER_ASSERT(r, exif.getHdrHeadroom(&hdrHeadroom));
-        REPORTER_ASSERT(r, approx_eq(hdrHeadroom, 3.755296f, kEpsilon));
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, data.get());
+        REPORTER_ASSERT(r, exif.fHdrHeadroom.has_value());
+        REPORTER_ASSERT(r, approx_eq(exif.fHdrHeadroom.value(), 3.755296f, kEpsilon));
 
-        uint16_t resolutionUnit = 0;
-        float xResolution = 0.f;
-        float yResolution = 0.f;
-        REPORTER_ASSERT(r, exif.getResolutionUnit(&resolutionUnit));
-        REPORTER_ASSERT(r, 2 == resolutionUnit);
-        REPORTER_ASSERT(r, exif.getXResolution(&xResolution));
-        REPORTER_ASSERT(r, 72.f == xResolution);
-        REPORTER_ASSERT(r, exif.getYResolution(&yResolution));
-        REPORTER_ASSERT(r, 72.f == yResolution);
+        REPORTER_ASSERT(r, exif.fResolutionUnit.has_value());
+        REPORTER_ASSERT(r, 2 == exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, exif.fXResolution.has_value());
+        REPORTER_ASSERT(r, 72.f == exif.fXResolution.value());
+        REPORTER_ASSERT(r, exif.fYResolution.has_value());
+        REPORTER_ASSERT(r, 72.f == exif.fYResolution.value());
 
-        uint32_t pixelXDimension = 0;
-        uint32_t pixelYDimension = 0;
-        REPORTER_ASSERT(r, exif.getPixelXDimension(&pixelXDimension));
-        REPORTER_ASSERT(r, 4032 == pixelXDimension);
-        REPORTER_ASSERT(r, exif.getPixelYDimension(&pixelYDimension));
-        REPORTER_ASSERT(r, 3024 == pixelYDimension);
+        REPORTER_ASSERT(r, exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, 4032 == exif.fPixelXDimension.value());
+        REPORTER_ASSERT(r, exif.fPixelYDimension.has_value());
+        REPORTER_ASSERT(r, 3024 == exif.fPixelYDimension.value());
     }
 
     {
         sk_sp<SkData> data = GetResourceAsData("images/test1-pixel32.exif");
         REPORTER_ASSERT(r, nullptr != data);
-        SkExifMetadata exif(data);
-        float hdrHeadroom = 0.f;
-        REPORTER_ASSERT(r, !exif.getHdrHeadroom(&hdrHeadroom));
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, data.get());
+        REPORTER_ASSERT(r, !exif.fHdrHeadroom.has_value());
 
-        uint16_t resolutionUnit = 0;
-        float xResolution = 0.f;
-        float yResolution = 0.f;
-        REPORTER_ASSERT(r, exif.getResolutionUnit(&resolutionUnit));
-        REPORTER_ASSERT(r, 2 == resolutionUnit);
-        REPORTER_ASSERT(r, exif.getXResolution(&xResolution));
-        REPORTER_ASSERT(r, 72.f == xResolution);
-        REPORTER_ASSERT(r, exif.getYResolution(&yResolution));
-        REPORTER_ASSERT(r, 72.f == yResolution);
+        REPORTER_ASSERT(r, exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, 2 == exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, exif.fXResolution.has_value());
+        REPORTER_ASSERT(r, 72.f == exif.fXResolution.value());
+        REPORTER_ASSERT(r, exif.fYResolution.has_value());
+        REPORTER_ASSERT(r, 72.f == exif.fYResolution.value());
 
-        uint32_t pixelXDimension = 0;
-        uint32_t pixelYDimension = 0;
-        REPORTER_ASSERT(r, exif.getPixelXDimension(&pixelXDimension));
-        REPORTER_ASSERT(r, 200 == pixelXDimension);
-        REPORTER_ASSERT(r, exif.getPixelYDimension(&pixelYDimension));
-        REPORTER_ASSERT(r, 100 == pixelYDimension);
+        REPORTER_ASSERT(r, exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, 200 == exif.fPixelXDimension.value());
+        REPORTER_ASSERT(r, exif.fPixelYDimension.has_value());
+        REPORTER_ASSERT(r, 100 == exif.fPixelYDimension.value());
     }
 
     {
         sk_sp<SkData> data = GetResourceAsData("images/test2-nonuniform.exif");
         REPORTER_ASSERT(r, nullptr != data);
-        SkExifMetadata exif(data);
-        float hdrHeadroom = 0.f;
-        REPORTER_ASSERT(r, !exif.getHdrHeadroom(&hdrHeadroom));
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, data.get());
+        REPORTER_ASSERT(r, !exif.fHdrHeadroom.has_value());
 
-        uint16_t resolutionUnit = 0;
-        float xResolution = 0.f;
-        float yResolution = 0.f;
-        REPORTER_ASSERT(r, exif.getResolutionUnit(&resolutionUnit));
-        REPORTER_ASSERT(r, 2 == resolutionUnit);
-        REPORTER_ASSERT(r, exif.getXResolution(&xResolution));
-        REPORTER_ASSERT(r, 144.f == xResolution);
-        REPORTER_ASSERT(r, exif.getYResolution(&yResolution));
-        REPORTER_ASSERT(r, 36.f == yResolution);
+        REPORTER_ASSERT(r, exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, 2 == exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, exif.fXResolution.has_value());
+        REPORTER_ASSERT(r, 144.f == exif.fXResolution.value());
+        REPORTER_ASSERT(r, exif.fYResolution.has_value());
+        REPORTER_ASSERT(r, 36.f == exif.fYResolution.value());
 
-        uint32_t pixelXDimension = 0;
-        uint32_t pixelYDimension = 0;
-        REPORTER_ASSERT(r, exif.getPixelXDimension(&pixelXDimension));
-        REPORTER_ASSERT(r, 50 == pixelXDimension);
-        REPORTER_ASSERT(r, exif.getPixelYDimension(&pixelYDimension));
-        REPORTER_ASSERT(r, 100 == pixelYDimension);
+        REPORTER_ASSERT(r, exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, 50 == exif.fPixelXDimension.value());
+        REPORTER_ASSERT(r, exif.fPixelYDimension.has_value());
+        REPORTER_ASSERT(r, 100 == exif.fPixelYDimension.value());
     }
 
     {
         sk_sp<SkData> data = GetResourceAsData("images/test3-little-endian.exif");
         REPORTER_ASSERT(r, nullptr != data);
-        SkExifMetadata exif(data);
-        float hdrHeadroom = 0.f;
-        REPORTER_ASSERT(r, !exif.getHdrHeadroom(&hdrHeadroom));
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, data.get());
+        REPORTER_ASSERT(r, !exif.fHdrHeadroom.has_value());
 
-        uint16_t resolutionUnit = 0;
-        float xResolution = 0.f;
-        float yResolution = 0.f;
-        REPORTER_ASSERT(r, exif.getResolutionUnit(&resolutionUnit));
-        REPORTER_ASSERT(r, 2 == resolutionUnit);
-        REPORTER_ASSERT(r, exif.getXResolution(&xResolution));
-        REPORTER_ASSERT(r, 350.f == xResolution);
-        REPORTER_ASSERT(r, exif.getYResolution(&yResolution));
-        REPORTER_ASSERT(r, 350.f == yResolution);
+        REPORTER_ASSERT(r, exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, 2 == exif.fResolutionUnit.value());
+        REPORTER_ASSERT(r, exif.fXResolution.has_value());
+        REPORTER_ASSERT(r, 350.f == exif.fXResolution.value());
+        REPORTER_ASSERT(r, exif.fYResolution.has_value());
+        REPORTER_ASSERT(r, 350.f == exif.fYResolution.value());
 
-        uint32_t pixelXDimension = 0;
-        uint32_t pixelYDimension = 0;
-        REPORTER_ASSERT(r, !exif.getPixelXDimension(&pixelXDimension));
-        REPORTER_ASSERT(r, !exif.getPixelYDimension(&pixelYDimension));
+        REPORTER_ASSERT(r, !exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, !exif.fPixelYDimension.has_value());
     }
 
     {
@@ -166,19 +173,45 @@ DEF_TEST(ExifParse, r) {
         memset(static_cast<uint8_t*>(data->writable_data()) + 2240, 0, 4);
 
         // Parse the corrupted Exif.
-        SkExifMetadata exif(data);
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, data.get());
 
         // HDR headroom signed denominators are destroyed.
-        float hdrHeadroom = 0.f;
-        REPORTER_ASSERT(r, exif.getHdrHeadroom(&hdrHeadroom));
-        REPORTER_ASSERT(r, approx_eq(hdrHeadroom, 3.482202f, kEpsilon));
+        REPORTER_ASSERT(r, exif.fHdrHeadroom.has_value());
+        REPORTER_ASSERT(r, approx_eq(exif.fHdrHeadroom.value(), 3.482202f, kEpsilon));
 
         // The X resolution should be zero.
-        float xResolution = 0.f;
-        float yResolution = 0.f;
-        REPORTER_ASSERT(r, exif.getXResolution(&xResolution));
-        REPORTER_ASSERT(r, 0.f == xResolution);
-        REPORTER_ASSERT(r, exif.getYResolution(&yResolution));
-        REPORTER_ASSERT(r, 72.f == yResolution);
+        REPORTER_ASSERT(r, exif.fXResolution.has_value());
+        REPORTER_ASSERT(r, 0.f == exif.fXResolution.value());
+        REPORTER_ASSERT(r, exif.fYResolution.has_value());
+        REPORTER_ASSERT(r, 72.f == exif.fYResolution.value());
+    }
+}
+
+DEF_TEST(ExifTruncate, r) {
+    sk_sp<SkData> data = GetResourceAsData("images/test0-hdr.exif");
+
+    // At 545 bytes, we do not have either value yet.
+    {
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, SkData::MakeWithCopy(data->bytes(), 545).get());
+        REPORTER_ASSERT(r, !exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, !exif.fPixelYDimension.has_value());
+    }
+
+    // At 546 bytes, we have one.
+    {
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, SkData::MakeWithCopy(data->bytes(), 546).get());
+        REPORTER_ASSERT(r, exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, !exif.fPixelYDimension.has_value());
+    }
+
+    // At 558 bytes (12 bytes later, one tag), we have both.
+    {
+        SkExif::Metadata exif;
+        SkExif::Parse(exif, SkData::MakeWithCopy(data->bytes(), 558).get());
+        REPORTER_ASSERT(r, exif.fPixelXDimension.has_value());
+        REPORTER_ASSERT(r, exif.fPixelYDimension.has_value());
     }
 }

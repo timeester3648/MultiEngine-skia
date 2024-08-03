@@ -107,7 +107,7 @@ private:
 sk_sp<SkImageFilter> SkImageFilters::Blur(
         SkScalar sigmaX, SkScalar sigmaY, SkTileMode tileMode, sk_sp<SkImageFilter> input,
         const CropRect& cropRect) {
-    if (!SkScalarsAreFinite(sigmaX, sigmaY) || sigmaX < 0.f || sigmaY < 0.f) {
+    if (!SkIsFinite(sigmaX, sigmaY) || sigmaX < 0.f || sigmaY < 0.f) {
         // Non-finite or negative sigmas are error conditions. We allow 0 sigma for X and/or Y
         // for 1D blurs; onFilterImage() will detect when no visible blurring would occur based on
         // the Context mapping.
@@ -457,6 +457,80 @@ private:
     //    buffer0[i] = leading edge
     void blurSegment(
             int n, const uint32_t* src, int srcStride, uint32_t* dst, int dstStride) override {
+#if SK_CPU_LSX_LEVEL >= SK_CPU_LSX_LEVEL_LSX
+        skvx::Vec<4, uint32_t>* buffer0Cursor = fBuffer0Cursor;
+        skvx::Vec<4, uint32_t>* buffer1Cursor = fBuffer1Cursor;
+        skvx::Vec<4, uint32_t>* buffer2Cursor = fBuffer2Cursor;
+        v4u32 sum0 = __lsx_vld(fSum0, 0); // same as skvx::Vec<4, uint32_t>::Load(fSum0);
+        v4u32 sum1 = __lsx_vld(fSum1, 0);
+        v4u32 sum2 = __lsx_vld(fSum2, 0);
+
+        auto processValue = [&](v4u32& vLeadingEdge){
+          sum0 += vLeadingEdge;
+          sum1 += sum0;
+          sum2 += sum1;
+
+          v4u32 divisorFactor = __lsx_vreplgr2vr_w(fDivider.divisorFactor());
+          v4u32 blurred = __lsx_vmuh_w(divisorFactor, sum2);
+
+          v4u32 buffer2Value = __lsx_vld(buffer2Cursor, 0); //Not fBuffer0Cursor, out of bounds.
+          sum2 -= buffer2Value;
+          __lsx_vst(sum1, (void *)buffer2Cursor, 0);
+          buffer2Cursor = (buffer2Cursor + 1) < fBuffersEnd ? buffer2Cursor + 1 : fBuffer2;
+          v4u32 buffer1Value = __lsx_vld(buffer1Cursor, 0);
+          sum1 -= buffer1Value;
+          __lsx_vst(sum0, (void *)buffer1Cursor, 0);
+          buffer1Cursor = (buffer1Cursor + 1) < fBuffer2 ? buffer1Cursor + 1 : fBuffer1;
+          v4u32 buffer0Value = __lsx_vld(buffer0Cursor, 0);
+          sum0 -= buffer0Value;
+          __lsx_vst(vLeadingEdge, (void *)buffer0Cursor, 0);
+          buffer0Cursor = (buffer0Cursor + 1) < fBuffer1 ? buffer0Cursor + 1 : fBuffer0;
+
+          v16u8 shuf = {0x0,0x4,0x8,0xc,0x0};
+          v16u8 ret = __lsx_vshuf_b(blurred, blurred, shuf);
+          return ret;
+        };
+
+        v4u32 zero = __lsx_vldi(0x0);
+        if (!src && !dst) {
+            while (n --> 0) {
+                (void)processValue(zero);
+            }
+        } else if (src && !dst) {
+            while (n --> 0) {
+                v4u32 edge = __lsx_vinsgr2vr_w(zero, *src, 0);
+                edge = __lsx_vilvl_b(zero, edge);
+                edge = __lsx_vilvl_h(zero, edge);
+                (void)processValue(edge);
+                src += srcStride;
+            }
+        } else if (!src && dst) {
+            while (n --> 0) {
+                v4u32 ret = processValue(zero);
+                __lsx_vstelm_w(ret, dst, 0, 0); // 3rd is offset, 4th is idx.
+                dst += dstStride;
+            }
+        } else if (src && dst) {
+            while (n --> 0) {
+                v4u32 edge = __lsx_vinsgr2vr_w(zero, *src, 0);
+                edge = __lsx_vilvl_b(zero, edge);
+                edge = __lsx_vilvl_h(zero, edge);
+                v4u32 ret = processValue(edge);
+                __lsx_vstelm_w(ret, dst, 0, 0);
+                src += srcStride;
+                dst += dstStride;
+            }
+        }
+
+        // Store the state
+        fBuffer0Cursor = buffer0Cursor;
+        fBuffer1Cursor = buffer1Cursor;
+        fBuffer2Cursor = buffer2Cursor;
+
+        __lsx_vst(sum0, fSum0, 0);
+        __lsx_vst(sum1, fSum1, 0);
+        __lsx_vst(sum2, fSum2, 0);
+#else
         skvx::Vec<4, uint32_t>* buffer0Cursor = fBuffer0Cursor;
         skvx::Vec<4, uint32_t>* buffer1Cursor = fBuffer1Cursor;
         skvx::Vec<4, uint32_t>* buffer2Cursor = fBuffer2Cursor;
@@ -519,6 +593,7 @@ private:
         sum0.store(fSum0);
         sum1.store(fSum1);
         sum2.store(fSum2);
+#endif
     }
 
     skvx::Vec<4, uint32_t>* const fBuffer0;
@@ -924,15 +999,15 @@ skif::FilterResult SkBlurImageFilter::onFilterImage(const skif::Context& ctx) co
     SkASSERT(sigma.width() >= 0.f && sigma.width() <= kMaxSigma &&
              sigma.height() >= 0.f && sigma.height() <= kMaxSigma);
 
-    // TODO: This is equivalent to what Builder::blur() calculates under the hood, but is calculated
-    // *before* we apply any legacy tile mode since the legacy tiling did not actually cause the
-    // output to extend fully.
-    skif::LayerSpace<SkIRect> maxOutput =
-            this->kernelBounds(ctx.mapping(), childOutput.layerBounds(), gpuBacked);
-    if (!maxOutput.intersect(ctx.desiredOutput())) {
-        return {};
+    // By default, FilterResult::blur() will calculate a more optimal output automatically, so
+    // convey the original output to it.
+    skif::LayerSpace<SkIRect> maxOutput = ctx.desiredOutput();
+    if (!gpuBacked || fLegacyTileMode != SkTileMode::kDecal) {
+        maxOutput = this->kernelBounds(ctx.mapping(), childOutput.layerBounds(), gpuBacked);
+        if (!maxOutput.intersect(ctx.desiredOutput())) {
+            return {};
+        }
     }
-
     if (fLegacyTileMode != SkTileMode::kDecal) {
         // Legacy tiling applied to the input image when there was no explicit crop rect. Use the
         // child's output image's layer bounds as the crop rectangle to adjust the edge tile mode
@@ -987,7 +1062,7 @@ skif::LayerSpace<SkSize> SkBlurImageFilter::mapSigma(const skif::Mapping& mappin
 
     // Disable bluring on axes that are not finite, or that are small enough that the blur is
     // effectively an identity.
-    if (!SkScalarIsFinite(sigma.width()) || (!gpuBacked && calculate_window(sigma.width()) <= 1)
+    if (!SkIsFinite(sigma.width()) || (!gpuBacked && calculate_window(sigma.width()) <= 1)
 #if defined(SK_GANESH) || defined(SK_GRAPHITE)
         || (gpuBacked && skgpu::BlurIsEffectivelyIdentity(sigma.width()))
 #endif
@@ -995,7 +1070,7 @@ skif::LayerSpace<SkSize> SkBlurImageFilter::mapSigma(const skif::Mapping& mappin
         sigma = skif::LayerSpace<SkSize>({0.f, sigma.height()});
     }
 
-    if (!SkScalarIsFinite(sigma.height()) || (!gpuBacked && calculate_window(sigma.height()) <= 1)
+    if (!SkIsFinite(sigma.height()) || (!gpuBacked && calculate_window(sigma.height()) <= 1)
 #if defined(SK_GANESH) || defined(SK_GRAPHITE)
         || (gpuBacked && skgpu::BlurIsEffectivelyIdentity(sigma.height()))
 #endif

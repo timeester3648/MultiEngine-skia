@@ -22,10 +22,11 @@
 #include "include/gpu/vk/VulkanExtensions.h"
 #include "include/gpu/vk/VulkanMutableTextureState.h"
 #include "include/gpu/vk/VulkanTypes.h"
-#include "include/private/gpu/graphite/ContextOptionsPriv.h"
+#include "src/gpu/graphite/ContextOptionsPriv.h"
 #include "src/base/SkAutoMalloc.h"
 #include "src/gpu/graphite/vk/VulkanGraphiteUtilsPriv.h"
 #include "src/gpu/vk/VulkanInterface.h"
+#include "src/gpu/vk/vulkanmemoryallocator/VulkanAMDMemoryAllocator.h"
 #include "tools/GpuToolUtils.h"
 #include "tools/ToolUtils.h"
 
@@ -374,12 +375,12 @@ bool GraphiteVulkanWindowContext::createBuffers(VkFormat format,
         info.fFlags = fDisplayParams.fCreateProtectedNativeBackend ? VK_IMAGE_CREATE_PROTECTED_BIT
                                                                    : 0;
 
-        skgpu::graphite::BackendTexture backendTex(this->dimensions(),
-                                                   info,
-                                                   VK_IMAGE_LAYOUT_UNDEFINED,
-                                                   fPresentQueueIndex,
-                                                   fImages[i],
-                                                   skgpu::VulkanAlloc());
+        auto backendTex = skgpu::graphite::BackendTextures::MakeVulkan(this->dimensions(),
+                                                                       info,
+                                                                       VK_IMAGE_LAYOUT_UNDEFINED,
+                                                                       fPresentQueueIndex,
+                                                                       fImages[i],
+                                                                       skgpu::VulkanAlloc());
 
         fSurfaces[i] = SkSurfaces::WrapBackendTexture(this->graphiteRecorder(),
                                                       backendTex,
@@ -405,9 +406,11 @@ bool GraphiteVulkanWindowContext::createBuffers(VkFormat format,
     for (uint32_t i = 0; i < fImageCount + 1; ++i) {
         fBackbuffers[i].fImageIndex = -1;
         VkResult result;
-        VULKAN_CALL_RESULT(fInterface, result,
-                           CreateSemaphore(fDevice, &semaphoreInfo, nullptr,
-                                           &fBackbuffers[i].fRenderSemaphore));
+        VULKAN_CALL_RESULT_NOCHECK(
+                fInterface,
+                result,
+                CreateSemaphore(
+                        fDevice, &semaphoreInfo, nullptr, &fBackbuffers[i].fRenderSemaphore));
     }
     fCurrentBackbufferIndex = fImageCount;
 
@@ -512,8 +515,8 @@ sk_sp<SkSurface> GraphiteVulkanWindowContext::getBackbufferSurface() {
     semaphoreInfo.pNext = nullptr;
     semaphoreInfo.flags = 0;
     VkResult result;
-    VULKAN_CALL_RESULT(fInterface, result,
-                       CreateSemaphore(fDevice, &semaphoreInfo, nullptr, &fWaitSemaphore));
+    VULKAN_CALL_RESULT_NOCHECK(
+            fInterface, result, CreateSemaphore(fDevice, &semaphoreInfo, nullptr, &fWaitSemaphore));
 
     // acquire the image
     VkResult res = fAcquireNextImageKHR(fDevice, fSwapchain, UINT64_MAX,
@@ -556,6 +559,8 @@ void GraphiteVulkanWindowContext::onSwapBuffers() {
 
     BackbufferInfo* backbuffer = fBackbuffers + fCurrentBackbufferIndex;
 
+    // Rather than using snapRecordingAndSubmit we explicitly do that work here
+    // so we can set up the swapchain semaphores.
     std::unique_ptr<skgpu::graphite::Recording> recording = fGraphiteRecorder->snap();
     if (recording) {
         skgpu::graphite::InsertRecordingInfo info;
@@ -568,10 +573,11 @@ void GraphiteVulkanWindowContext::onSwapBuffers() {
         info.fTargetTextureState = &presentState;
 
         SkASSERT(fWaitSemaphore != VK_NULL_HANDLE);
-        skgpu::graphite::BackendSemaphore beWaitSemaphore(fWaitSemaphore);
+        auto beWaitSemaphore = skgpu::graphite::BackendSemaphores::MakeVulkan(fWaitSemaphore);
         info.fNumWaitSemaphores = 1;
         info.fWaitSemaphores = &beWaitSemaphore;
-        skgpu::graphite::BackendSemaphore beSignalSemaphore(backbuffer->fRenderSemaphore);
+        auto beSignalSemaphore =
+                skgpu::graphite::BackendSemaphores::MakeVulkan(backbuffer->fRenderSemaphore);
         info.fNumSignalSemaphores = 1;
         info.fSignalSemaphores = &beSignalSemaphore;
 

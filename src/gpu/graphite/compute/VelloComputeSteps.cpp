@@ -40,13 +40,13 @@ ComputeStep::NativeShaderSource VelloNativeShaderSource(vello_cpp::ShaderStage s
     ::rust::Str source;
     std::string entryPoint;
     switch (format) {
-#ifdef SK_DAWN
+#if VELLO_WGSL_SHADERS
         case NativeFormat::kWGSL:
             source = shader.wgsl();
             entryPoint = "main";
             break;
 #endif
-#ifdef SK_METAL
+#if VELLO_MSL_SHADERS
         case NativeFormat::kMSL:
             source = shader.msl();
             entryPoint = "main_";
@@ -59,19 +59,27 @@ ComputeStep::NativeShaderSource VelloNativeShaderSource(vello_cpp::ShaderStage s
     return {{source.data(), source.length()}, std::move(entryPoint)};
 }
 
-#define BUFFER_BINDING(slot, type, policy)          \
-        {                                           \
-            /*type=*/ResourceType::k##type##Buffer, \
-            /*flow=*/DataFlow::kShared,             \
-            /*policy=*/ResourcePolicy::k##policy,   \
-            /*slot=*/kVelloSlot_##slot,             \
+#define BUFFER_BINDING(slot, type, policy)                       \
+        {                                                        \
+            /*type=*/ComputeStep::ResourceType::k##type##Buffer, \
+            /*flow=*/ComputeStep::DataFlow::kShared,             \
+            /*policy=*/ComputeStep::ResourcePolicy::k##policy,   \
+            /*slot=*/kVelloSlot_##slot,                          \
+        }
+
+#define TEXTURE_BINDING(slot, type, policy)                       \
+        {                                                         \
+            /*type=*/ComputeStep::ResourceType::k##type##Texture, \
+            /*flow=*/ComputeStep::DataFlow::kShared,              \
+            /*policy=*/ComputeStep::ResourcePolicy::k##policy,    \
+            /*slot=*/kVelloSlot_##slot,                           \
         }
 
 // PathtagReduce
 VelloPathtagReduceStep::VelloPathtagReduceStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform,       Uniform, Mapped),
-                  BUFFER_BINDING(Scene,               Storage, Mapped),
+                  BUFFER_BINDING(Scene,               ReadOnlyStorage, Mapped),
                   BUFFER_BINDING(PathtagReduceOutput, Storage, None),
           }) {}
 
@@ -79,23 +87,23 @@ VelloPathtagReduceStep::VelloPathtagReduceStep()
 VelloPathtagScanSmallStep::VelloPathtagScanSmallStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform,       Uniform, None),
-                  BUFFER_BINDING(Scene,               Storage, None),
-                  BUFFER_BINDING(PathtagReduceOutput, Storage, None),
+                  BUFFER_BINDING(Scene,               ReadOnlyStorage, None),
+                  BUFFER_BINDING(PathtagReduceOutput, ReadOnlyStorage, None),
                   BUFFER_BINDING(TagMonoid,           Storage, None),
           }) {}
 
 // PathtagReduce2
 VelloPathtagReduce2Step::VelloPathtagReduce2Step()
         : VelloStep({
-                  BUFFER_BINDING(LargePathtagReduceFirstPassOutput,  Storage, None),
+                  BUFFER_BINDING(LargePathtagReduceFirstPassOutput,  ReadOnlyStorage, None),
                   BUFFER_BINDING(LargePathtagReduceSecondPassOutput, Storage, None),
           }) {}
 
 // PathtagScan1
 VelloPathtagScan1Step::VelloPathtagScan1Step()
         : VelloStep({
-                  BUFFER_BINDING(LargePathtagReduceFirstPassOutput,  Storage, None),
-                  BUFFER_BINDING(LargePathtagReduceSecondPassOutput, Storage, None),
+                  BUFFER_BINDING(LargePathtagReduceFirstPassOutput,  ReadOnlyStorage, None),
+                  BUFFER_BINDING(LargePathtagReduceSecondPassOutput, ReadOnlyStorage, None),
                   BUFFER_BINDING(LargePathtagScanFirstPassOutput,    Storage, None),
           }) {}
 
@@ -103,8 +111,8 @@ VelloPathtagScan1Step::VelloPathtagScan1Step()
 VelloPathtagScanLargeStep::VelloPathtagScanLargeStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform,                   Uniform, None),
-                  BUFFER_BINDING(Scene,                           Storage, None),
-                  BUFFER_BINDING(LargePathtagScanFirstPassOutput, Storage, None),
+                  BUFFER_BINDING(Scene,                           ReadOnlyStorage, None),
+                  BUFFER_BINDING(LargePathtagScanFirstPassOutput, ReadOnlyStorage, None),
                   BUFFER_BINDING(TagMonoid,                       Storage, None),
           }) {}
 
@@ -115,21 +123,22 @@ VelloBboxClearStep::VelloBboxClearStep()
                   BUFFER_BINDING(PathBBoxes,    Storage, None),
           }) {}
 
-// Pathseg
-VelloPathsegStep::VelloPathsegStep()
+// Flatten
+VelloFlattenStep::VelloFlattenStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(Scene,         Storage, None),
-                  BUFFER_BINDING(TagMonoid,     Storage, None),
+                  BUFFER_BINDING(Scene,         ReadOnlyStorage, None),
+                  BUFFER_BINDING(TagMonoid,     ReadOnlyStorage, None),
                   BUFFER_BINDING(PathBBoxes,    Storage, None),
-                  BUFFER_BINDING(Cubics,        Storage, None),
+                  BUFFER_BINDING(BumpAlloc,     Storage, Clear),
+                  BUFFER_BINDING(Lines,         Storage, None),
           }) {}
 
 // DrawReduce
 VelloDrawReduceStep::VelloDrawReduceStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform,    Uniform, None),
-                  BUFFER_BINDING(Scene,            Storage, None),
+                  BUFFER_BINDING(Scene,            ReadOnlyStorage, None),
                   BUFFER_BINDING(DrawReduceOutput, Storage, None),
           }) {}
 
@@ -137,9 +146,9 @@ VelloDrawReduceStep::VelloDrawReduceStep()
 VelloDrawLeafStep::VelloDrawLeafStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform,    Uniform, None),
-                  BUFFER_BINDING(Scene,            Storage, None),
-                  BUFFER_BINDING(DrawReduceOutput, Storage, None),
-                  BUFFER_BINDING(PathBBoxes,       Storage, None),
+                  BUFFER_BINDING(Scene,            ReadOnlyStorage, None),
+                  BUFFER_BINDING(DrawReduceOutput, ReadOnlyStorage, None),
+                  BUFFER_BINDING(PathBBoxes,       ReadOnlyStorage, None),
                   BUFFER_BINDING(DrawMonoid,       Storage, None),
                   BUFFER_BINDING(InfoBinData,      Storage, None),
                   BUFFER_BINDING(ClipInput,        Storage, None),
@@ -148,8 +157,8 @@ VelloDrawLeafStep::VelloDrawLeafStep()
 // ClipReduce
 VelloClipReduceStep::VelloClipReduceStep()
         : VelloStep({
-                  BUFFER_BINDING(ClipInput,    Storage, None),
-                  BUFFER_BINDING(PathBBoxes,   Storage, None),
+                  BUFFER_BINDING(ClipInput,    ReadOnlyStorage, None),
+                  BUFFER_BINDING(PathBBoxes,   ReadOnlyStorage, None),
                   BUFFER_BINDING(ClipBicyclic, Storage, None),
                   BUFFER_BINDING(ClipElement,  Storage, None),
           }) {}
@@ -158,10 +167,10 @@ VelloClipReduceStep::VelloClipReduceStep()
 VelloClipLeafStep::VelloClipLeafStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(ClipInput,     Storage, None),
-                  BUFFER_BINDING(PathBBoxes,    Storage, None),
-                  BUFFER_BINDING(ClipBicyclic,  Storage, None),
-                  BUFFER_BINDING(ClipElement,   Storage, None),
+                  BUFFER_BINDING(ClipInput,     ReadOnlyStorage, None),
+                  BUFFER_BINDING(PathBBoxes,    ReadOnlyStorage, None),
+                  BUFFER_BINDING(ClipBicyclic,  ReadOnlyStorage, None),
+                  BUFFER_BINDING(ClipElement,   ReadOnlyStorage, None),
                   BUFFER_BINDING(DrawMonoid,    Storage, None),
                   BUFFER_BINDING(ClipBBoxes,    Storage, None),
           }) {}
@@ -170,11 +179,11 @@ VelloClipLeafStep::VelloClipLeafStep()
 VelloBinningStep::VelloBinningStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(DrawMonoid,    Storage, None),
-                  BUFFER_BINDING(PathBBoxes,    Storage, None),
-                  BUFFER_BINDING(ClipBBoxes,    Storage, None),
+                  BUFFER_BINDING(DrawMonoid,    ReadOnlyStorage, None),
+                  BUFFER_BINDING(PathBBoxes,    ReadOnlyStorage, None),
+                  BUFFER_BINDING(ClipBBoxes,    ReadOnlyStorage, None),
                   BUFFER_BINDING(DrawBBoxes,    Storage, None),
-                  BUFFER_BINDING(BumpAlloc,     Storage, Clear),
+                  BUFFER_BINDING(BumpAlloc,     Storage, None),
                   BUFFER_BINDING(InfoBinData,   Storage, None),
                   BUFFER_BINDING(BinHeader,     Storage, None),
           }) {}
@@ -183,37 +192,37 @@ VelloBinningStep::VelloBinningStep()
 VelloTileAllocStep::VelloTileAllocStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(Scene,         Storage, None),
-                  BUFFER_BINDING(DrawBBoxes,    Storage, None),
+                  BUFFER_BINDING(Scene,         ReadOnlyStorage, None),
+                  BUFFER_BINDING(DrawBBoxes,    ReadOnlyStorage, None),
                   BUFFER_BINDING(BumpAlloc,     Storage, None),
                   BUFFER_BINDING(Path,          Storage, None),
                   BUFFER_BINDING(Tile,          Storage, None),
           }) {}
 
-// PathCoarseFull
-VelloPathCoarseFullStep::VelloPathCoarseFullStep()
+// PathCountSetup
+VelloPathCountSetupStep::VelloPathCountSetupStep()
         : VelloStep({
-                  BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(Scene,         Storage, None),
-                  BUFFER_BINDING(Cubics,        Storage, None),
-                  BUFFER_BINDING(Path,          Storage, None),
                   BUFFER_BINDING(BumpAlloc,     Storage, None),
-                  BUFFER_BINDING(Tile,          Storage, None),
-                  BUFFER_BINDING(Segments,      Storage, None),
+                  BUFFER_BINDING(IndirectCount, Storage, None),
           }) {}
 
-// Backdrop
-VelloBackdropStep::VelloBackdropStep()
+// PathCount
+VelloPathCountStep::VelloPathCountStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
+                  BUFFER_BINDING(BumpAlloc,     Storage, None),
+                  BUFFER_BINDING(Lines,         ReadOnlyStorage, None),
+                  BUFFER_BINDING(Path,          ReadOnlyStorage, None),
                   BUFFER_BINDING(Tile,          Storage, None),
+                  BUFFER_BINDING(SegmentCounts, Storage, None),
           }) {}
 
 // BackdropDyn
 VelloBackdropDynStep::VelloBackdropDynStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(Path, Storage, None),
+                  BUFFER_BINDING(BumpAlloc,     Storage, None),
+                  BUFFER_BINDING(Path, ReadOnlyStorage, None),
                   BUFFER_BINDING(Tile, Storage, None),
           }) {}
 
@@ -221,46 +230,64 @@ VelloBackdropDynStep::VelloBackdropDynStep()
 VelloCoarseStep::VelloCoarseStep()
         : VelloStep({
                   BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(Scene,         Storage, None),
-                  BUFFER_BINDING(DrawMonoid,    Storage, None),
-                  BUFFER_BINDING(BinHeader,     Storage, None),
-                  BUFFER_BINDING(InfoBinData,   Storage, None),
-                  BUFFER_BINDING(Path,          Storage, None),
+                  BUFFER_BINDING(Scene,         ReadOnlyStorage, None),
+                  BUFFER_BINDING(DrawMonoid,    ReadOnlyStorage, None),
+                  BUFFER_BINDING(BinHeader,     ReadOnlyStorage, None),
+                  BUFFER_BINDING(InfoBinData,   ReadOnlyStorage, None),
+                  BUFFER_BINDING(Path,          ReadOnlyStorage, None),
                   BUFFER_BINDING(Tile,          Storage, None),
                   BUFFER_BINDING(BumpAlloc,     Storage, None),
                   BUFFER_BINDING(PTCL,          Storage, None),
           }) {}
 
-// Fine
-VelloFineStep::VelloFineStep(SkColorType targetFormat)
+// PathTilingSetup
+VelloPathTilingSetupStep::VelloPathTilingSetupStep()
         : VelloStep({
-                  BUFFER_BINDING(ConfigUniform, Uniform, None),
-                  BUFFER_BINDING(Segments,      Storage, None),
+                  BUFFER_BINDING(BumpAlloc,     Storage, None),
+                  BUFFER_BINDING(IndirectCount, Storage, None),
                   BUFFER_BINDING(PTCL,          Storage, None),
-                  BUFFER_BINDING(InfoBinData,   Storage, None),
-                  {
-                          /*type=*/ResourceType::kWriteOnlyStorageTexture,
-                          /*flow=*/DataFlow::kShared,
-                          /*policy=*/ResourcePolicy::kNone,
-                          /*slot=*/kVelloSlot_OutputImage,
-                  },
-                  {
-                          /*type=*/ResourceType::kReadOnlyTexture,
-                          /*flow=*/DataFlow::kShared,
-                          /*policy=*/ResourcePolicy::kNone,
-                          /*slot=*/kVelloSlot_GradientImage,
-                  },
-                  {
-                          /*type=*/ResourceType::kReadOnlyTexture,
-                          /*flow=*/DataFlow::kShared,
-                          /*policy=*/ResourcePolicy::kNone,
-                          /*slot=*/kVelloSlot_ImageAtlas,
-                  },
-          })
-        , fTargetFormat(targetFormat) {}
+          }) {}
 
-std::tuple<SkISize, SkColorType> VelloFineStep::calculateTextureParameters(int index, const ResourceDesc&) const {
-    return {{}, index == 4 ? fTargetFormat : kRGBA_8888_SkColorType};
-}
+// PathTiling
+VelloPathTilingStep::VelloPathTilingStep()
+        : VelloStep({
+                  BUFFER_BINDING(BumpAlloc,     Storage, None),
+                  BUFFER_BINDING(SegmentCounts, ReadOnlyStorage, None),
+                  BUFFER_BINDING(Lines,         ReadOnlyStorage, None),
+                  BUFFER_BINDING(Path,          ReadOnlyStorage, None),
+                  BUFFER_BINDING(Tile,          ReadOnlyStorage, None),
+                  BUFFER_BINDING(Segments,      Storage, None),
+          }) {}
+
+// Fine
+static constexpr ComputeStep::ResourceDesc kFineAreaResources[] = {
+        BUFFER_BINDING(ConfigUniform, Uniform,          None),
+        BUFFER_BINDING(Segments,      ReadOnlyStorage,  None),
+        BUFFER_BINDING(PTCL,          ReadOnlyStorage,  None),
+        BUFFER_BINDING(InfoBinData,   ReadOnlyStorage,  None),
+        TEXTURE_BINDING(OutputImage,  WriteOnlyStorage, None),
+};
+
+static constexpr ComputeStep::ResourceDesc kFineMsaaResources[] = {
+        BUFFER_BINDING(ConfigUniform, Uniform,          None),
+        BUFFER_BINDING(Segments,      ReadOnlyStorage,  None),
+        BUFFER_BINDING(PTCL,          ReadOnlyStorage,  None),
+        BUFFER_BINDING(InfoBinData,   ReadOnlyStorage,  None),
+        TEXTURE_BINDING(OutputImage,  WriteOnlyStorage, None),
+        BUFFER_BINDING(MaskLUT, ReadOnlyStorage, Mapped),
+};
+
+VelloFineAreaStep::VelloFineAreaStep() : VelloFineStepBase(kFineAreaResources) {}
+
+VelloFineMsaa16Step::VelloFineMsaa16Step() : VelloFineMsaaStepBase(kFineMsaaResources) {}
+
+VelloFineMsaa8Step::VelloFineMsaa8Step() : VelloFineMsaaStepBase(kFineMsaaResources) {}
+
+VelloFineAreaAlpha8Step::VelloFineAreaAlpha8Step() : VelloFineStepBase(kFineAreaResources) {}
+
+VelloFineMsaa16Alpha8Step::VelloFineMsaa16Alpha8Step()
+        : VelloFineMsaaStepBase(kFineMsaaResources) {}
+
+VelloFineMsaa8Alpha8Step::VelloFineMsaa8Alpha8Step() : VelloFineMsaaStepBase(kFineMsaaResources) {}
 
 }  // namespace skgpu::graphite
