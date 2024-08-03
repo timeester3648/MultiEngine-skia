@@ -69,6 +69,8 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/codec/*Avif*",
 		"./src/codec/*Wuffs*",
 
+		"./src/sksl/codegen/*WGSL*",
+
 		"./src/gpu/graphite/compute/*Vello*",
 		
 		"./src/encode/*SkPngEncoderImpl*",
@@ -116,7 +118,10 @@ void main(MultiBuild::Workspace& workspace) {
 		properties.defines({ "SK_BUILD_FOR_WIN", "_CRT_SECURE_NO_WARNINGS", "WIN32_LEAN_AND_MEAN" });
 		properties.excluded_files({ 
 			"./src/**/*posix*",
-			"./src/**/*ImageGeneratorCG*"
+			"./src/**/*ImageGeneratorCG*",
+
+			"./src/utils/*mac*",
+			"./src/utils/*linux*"
 		});
 	}
 

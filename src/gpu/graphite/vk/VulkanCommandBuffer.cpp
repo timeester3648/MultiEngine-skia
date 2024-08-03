@@ -152,8 +152,7 @@ VulkanCommandBuffer::~VulkanCommandBuffer() {
 void VulkanCommandBuffer::onResetCommandBuffer() {
     SkASSERT(!fActive);
     if (this->mlePool == nullptr) {
-        VULKAN_CALL_ERRCHECK(fSharedContext->interface(),
-                             ResetCommandPool(fSharedContext->device(), fPool, 0));
+        VULKAN_CALL_ERRCHECK(fSharedContext, ResetCommandPool(fSharedContext->device(), fPool, 0));
     } else {
         this->mleBuffer->reset();
 	}
