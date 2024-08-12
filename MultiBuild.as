@@ -71,6 +71,9 @@ void main(MultiBuild::Workspace& workspace) {
 		"./src/codec/*Avif*",
 		"./src/codec/*Wuffs*",
 
+		"./src/sksl/codegen/SkSLSPIRVtoHLSL.*",
+		"./src/sksl/codegen/SkSLSPIRVValidator.*",
+
 		"./src/sksl/codegen/*WGSL*",
 		"./src/sksl/SkSLModuleDataFile.cpp",
 
