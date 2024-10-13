@@ -56,12 +56,8 @@
 #include "src/image/SkSurface_Base.h"
 #include "src/sksl/SkSLGraphiteModules.h"
 
-#if defined(GRAPHITE_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 #include "src/gpu/graphite/ContextOptionsPriv.h"
-#if defined(SK_DAWN)
-#include "src/gpu/graphite/dawn/DawnSharedContext.h"
-#include "webgpu/webgpu_cpp.h"  // NO_G3_REWRITE
-#endif
 #endif
 
 namespace skgpu::graphite {
@@ -96,7 +92,7 @@ Context::Context(sk_sp<SharedContext> sharedContext,
                                                              SK_InvalidGenID,
                                                              options.fGpuBudgetInBytes);
     fMappedBufferManager = std::make_unique<ClientMappedBufferManager>(this->contextID());
-#if defined(GRAPHITE_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     if (options.fOptionsPriv) {
         fStoreContextRefInRecorder = options.fOptionsPriv->fStoreContextRefInRecorder;
     }
@@ -104,7 +100,7 @@ Context::Context(sk_sp<SharedContext> sharedContext,
 }
 
 Context::~Context() {
-#if defined(GRAPHITE_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     ASSERT_SINGLE_OWNER
     for (auto& recorder : fTrackedRecorders) {
         recorder->priv().setContext(nullptr);
@@ -141,7 +137,7 @@ std::unique_ptr<Recorder> Context::makeRecorder(const RecorderOptions& options) 
 
     // This is a client-owned Recorder so pass a null context so it creates its own ResourceProvider
     auto recorder = std::unique_ptr<Recorder>(new Recorder(fSharedContext, options, nullptr));
-#if defined(GRAPHITE_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
     if (fStoreContextRefInRecorder) {
         recorder->priv().setContext(this);
     }
@@ -788,6 +784,11 @@ size_t Context::currentBudgetedBytes() const {
     return fResourceProvider->getResourceCacheCurrentBudgetedBytes();
 }
 
+size_t Context::currentPurgeableBytes() const {
+    ASSERT_SINGLE_OWNER
+    return fResourceProvider->getResourceCacheCurrentPurgeableBytes();
+}
+
 size_t Context::maxBudgetedBytes() const {
     ASSERT_SINGLE_OWNER
     return fResourceProvider->getResourceCacheLimit();
@@ -814,7 +815,7 @@ bool Context::supportsProtectedContent() const {
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-#if defined(GRAPHITE_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 bool ContextPriv::readPixels(const SkPixmap& pm,
                              const TextureProxy* textureProxy,
                              const SkImageInfo& srcImageInfo,
@@ -860,14 +861,10 @@ bool ContextPriv::readPixels(const SkPixmap& pm,
         fContext->submit(SyncToCpu::kNo);
         if (fContext->fSharedContext->backend() == BackendApi::kDawn) {
             while (!asyncContext.fCalled) {
-#if defined(SK_DAWN)
-                auto dawnContext = static_cast<DawnSharedContext*>(fContext->fSharedContext.get());
-                dawnContext->device().Tick();
-                fContext->checkAsyncWorkCompletion();
-#endif
+                fContext->fSharedContext->deviceTick(fContext);
             }
         } else {
-            SK_ABORT("Only Dawn supports non-synching contexts.");
+            SK_ABORT("Only Dawn supports non-syncing contexts.");
         }
     }
     SkASSERT(asyncContext.fCalled);

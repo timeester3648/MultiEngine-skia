@@ -13,6 +13,7 @@
 #include "include/gpu/vk/VulkanTypes.h"
 #include "src/gpu/graphite/DrawPass.h"
 #include "src/gpu/graphite/vk/VulkanGraphicsPipeline.h"
+#include "src/gpu/graphite/vk/VulkanResourceProvider.h"
 
 // Note: to support timeline semaphore
 #include <MultiEngine/MultiEngineConfig.h>
@@ -29,7 +30,6 @@ namespace skgpu::graphite {
 
 class VulkanBuffer;
 class VulkanDescriptorSet;
-class VulkanResourceProvider;
 class VulkanSharedContext;
 class VulkanTexture;
 class Buffer;
@@ -83,6 +83,8 @@ private:
                         const VulkanSharedContext* sharedContext,
                         VulkanResourceProvider* resourceProvider);
 
+    ResourceProvider* resourceProvider() const override { return fResourceProvider; }
+
     void onResetCommandBuffer() override;
 
     void begin();
@@ -96,13 +98,15 @@ private:
                                       const MutableTextureState* newState) override;
 
     bool onAddRenderPass(const RenderPassDesc&,
-                        const Texture* colorTexture,
-                        const Texture* resolveTexture,
-                        const Texture* depthStencilTexture,
-                        SkRect viewport,
-                        const DrawPassList&) override;
+                         SkIRect renderPassBounds,
+                         const Texture* colorTexture,
+                         const Texture* resolveTexture,
+                         const Texture* depthStencilTexture,
+                         SkIRect viewport,
+                         const DrawPassList&) override;
 
     bool beginRenderPass(const RenderPassDesc&,
+                         SkIRect renderPassBounds,
                          const Texture* colorTexture,
                          const Texture* resolveTexture,
                          const Texture* depthStencilTexture);
@@ -112,8 +116,10 @@ private:
 
     // Track descriptor changes for binding prior to draw calls
     void recordBufferBindingInfo(const BindBufferInfo& info, UniformSlot);
+    // Either both arguments are non-null, or both must be null (to reset or handle just the
+    // dstCopy intrinsic w/o requiring a DrawPass command).
     void recordTextureAndSamplerDescSet(
-            const DrawPass&, const DrawPassCommands::BindTexturesAndSamplers&);
+            const DrawPass*, const DrawPassCommands::BindTexturesAndSamplers*);
 
     void bindTextureSamplers();
     void bindUniformBuffers();
@@ -184,10 +190,9 @@ private:
                          void* barrier);
     void submitPipelineBarriers(bool forSelfDependency = false);
 
-    // Update the intrinsic constant uniform with the latest rtAdjust value as determined by a
-    // given viewport. The resource provider is responsible for finding a suitable buffer and
-    // managing its lifetime.
-    void updateRtAdjustUniform(const SkRect& viewport);
+    // Update the intrinsic constant uniform buffer and binding to reflect the updated viewport.
+    // The resource provider is responsible for finding a suitable buffer and managing its lifetime.
+    void updateIntrinsicUniforms(SkIRect viewport);
 
     bool updateLoadMSAAVertexBuffer();
     bool loadMSAAFromResolve(const RenderPassDesc&,
@@ -199,7 +204,7 @@ private:
                       size_t dataSize,
                       size_t dstOffset = 0);
     void nextSubpass();
-    void setViewport(const SkRect& viewport);
+    void setViewport(SkIRect viewport);
 
     VkCommandPool fPool;
     VkCommandBuffer fPrimaryCommandBuffer;

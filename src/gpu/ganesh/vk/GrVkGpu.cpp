@@ -7,18 +7,28 @@
 
 #include "src/gpu/ganesh/vk/GrVkGpu.h"
 
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkSize.h"
+#include "include/core/SkSurface.h"
 #include "include/core/SkTextureCompressionType.h"
+#include "include/core/SkTypes.h"
 #include "include/gpu/GpuTypes.h"
-#include "include/gpu/GrBackendSemaphore.h"
-#include "include/gpu/GrBackendSurface.h"
-#include "include/gpu/GrContextOptions.h"
-#include "include/gpu/GrDirectContext.h"
+#include "include/gpu/MutableTextureState.h"
+#include "include/gpu/ganesh/GrBackendSurface.h"
+#include "include/gpu/ganesh/GrDirectContext.h"
 #include "include/gpu/ganesh/vk/GrVkBackendSemaphore.h"
 #include "include/gpu/ganesh/vk/GrVkBackendSurface.h"
-#include "include/gpu/vk/GrVkTypes.h"
+#include "include/gpu/ganesh/vk/GrVkTypes.h"
 #include "include/gpu/vk/VulkanBackendContext.h"
 #include "include/gpu/vk/VulkanExtensions.h"
+#include "include/gpu/vk/VulkanMemoryAllocator.h"
+#include "include/gpu/vk/VulkanMutableTextureState.h"
 #include "include/gpu/vk/VulkanTypes.h"
+#include "include/private/base/SkDebug.h"
+#include "include/private/base/SkTemplates.h"
 #include "include/private/base/SkTo.h"
 #include "include/private/gpu/vk/SkiaVulkan.h"
 #include "src/base/SkRectMemcpy.h"
@@ -26,38 +36,50 @@
 #include "src/core/SkMipmap.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/gpu/DataUtils.h"
-#include "src/gpu/GpuTypesPriv.h"
+#include "src/gpu/RefCntedCallback.h"
 #include "src/gpu/ganesh/GrBackendUtils.h"
+#include "src/gpu/ganesh/GrBuffer.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "src/gpu/ganesh/GrDataUtils.h"
 #include "src/gpu/ganesh/GrDirectContextPriv.h"
-#include "src/gpu/ganesh/GrGeometryProcessor.h"
-#include "src/gpu/ganesh/GrGpuResourceCacheAccess.h"
-#include "src/gpu/ganesh/GrNativeRect.h"
-#include "src/gpu/ganesh/GrPipeline.h"
+#include "src/gpu/ganesh/GrGpuBuffer.h"
+#include "src/gpu/ganesh/GrImageInfo.h"
 #include "src/gpu/ganesh/GrPixmap.h"
+#include "src/gpu/ganesh/GrProgramInfo.h"
 #include "src/gpu/ganesh/GrRenderTarget.h"
 #include "src/gpu/ganesh/GrResourceProvider.h"
+#include "src/gpu/ganesh/GrSurface.h"
+#include "src/gpu/ganesh/GrSurfaceProxy.h"
 #include "src/gpu/ganesh/GrTexture.h"
 #include "src/gpu/ganesh/GrThreadSafePipelineBuilder.h"
-#include "src/gpu/ganesh/SkGr.h"
-#include "src/gpu/ganesh/image/SkImage_Ganesh.h"
-#include "src/gpu/ganesh/surface/SkSurface_Ganesh.h"
 #include "src/gpu/ganesh/vk/GrVkBuffer.h"
 #include "src/gpu/ganesh/vk/GrVkCommandBuffer.h"
 #include "src/gpu/ganesh/vk/GrVkCommandPool.h"
 #include "src/gpu/ganesh/vk/GrVkFramebuffer.h"
 #include "src/gpu/ganesh/vk/GrVkImage.h"
 #include "src/gpu/ganesh/vk/GrVkOpsRenderPass.h"
-#include "src/gpu/ganesh/vk/GrVkPipeline.h"
-#include "src/gpu/ganesh/vk/GrVkPipelineState.h"
 #include "src/gpu/ganesh/vk/GrVkRenderPass.h"
+#include "src/gpu/ganesh/vk/GrVkRenderTarget.h"
 #include "src/gpu/ganesh/vk/GrVkResourceProvider.h"
 #include "src/gpu/ganesh/vk/GrVkSemaphore.h"
 #include "src/gpu/ganesh/vk/GrVkTexture.h"
 #include "src/gpu/ganesh/vk/GrVkTextureRenderTarget.h"
+#include "src/gpu/ganesh/vk/GrVkUtil.h"
 #include "src/gpu/vk/VulkanInterface.h"
 #include "src/gpu/vk/VulkanMemory.h"
 #include "src/gpu/vk/VulkanUtilsPriv.h"
+
+#include <algorithm>
+#include <cstring>
+#include <functional>
+#include <utility>
+
+class GrAttachment;
+class GrBackendSemaphore;
+class GrManagedResource;
+class GrProgramDesc;
+class GrSemaphore;
+struct GrContextOptions;
 
 #if defined(SK_USE_VMA)
 #include "src/gpu/vk/vulkanmemoryallocator/VulkanMemoryAllocatorPriv.h"
@@ -341,14 +363,14 @@ GrOpsRenderPass* GrVkGpu::onGetOpsRenderPass(
     return fCachedOpsRenderPass.get();
 }
 
-bool GrVkGpu::submitCommandBuffer(SyncQueue sync) {
+bool GrVkGpu::submitCommandBuffer(const GrSubmitInfo& submitInfo) {
     TRACE_EVENT0("skia.gpu", TRACE_FUNC);
     if (!this->currentCommandBuffer()) {
         return false;
     }
     SkASSERT(!fCachedOpsRenderPass || !fCachedOpsRenderPass->isActive());
 
-    if (!this->currentCommandBuffer()->hasWork() && kForce_SyncQueue != sync &&
+    if (!this->currentCommandBuffer()->hasWork() && submitInfo.fSync == GrSyncCpu::kNo &&
         fSemaphoresToSignal.empty() && fSemaphoresToWaitOn.empty()) {
         // We may have added finished procs during the flush call. Since there is no actual work
         // we are not submitting the command buffer and may never come back around to submit it.
@@ -364,9 +386,9 @@ bool GrVkGpu::submitCommandBuffer(SyncQueue sync) {
     SkASSERT(fMainCmdPool);
     fMainCmdPool->close();
     bool didSubmit = fMainCmdBuffer->submitToQueue(this, fQueue, fSemaphoresToSignal,
-                                                   fSemaphoresToWaitOn);
+                                                   fSemaphoresToWaitOn, submitInfo);
 
-    if (didSubmit && sync == kForce_SyncQueue) {
+    if (didSubmit && submitInfo.fSync == GrSyncCpu::kYes) {
         fMainCmdBuffer->forceSync(this);
     }
 
@@ -470,7 +492,9 @@ bool GrVkGpu::onWritePixels(GrSurface* surface,
                                      VK_ACCESS_HOST_WRITE_BIT,
                                      VK_PIPELINE_STAGE_HOST_BIT,
                                      false);
-            if (!this->submitCommandBuffer(kForce_SyncQueue)) {
+            GrSubmitInfo submitInfo;
+            submitInfo.fSync = GrSyncCpu::kYes;
+            if (!this->submitCommandBuffer(submitInfo)) {
                 return false;
             }
         }
@@ -2024,7 +2048,7 @@ bool GrVkGpu::compile(const GrProgramDesc& desc, const GrProgramInfo& programInf
     return stat != GrThreadSafePipelineBuilder::Stats::ProgramCacheResult::kHit;
 }
 
-#if defined(GR_TEST_UTILS)
+#if defined(GPU_TEST_UTILS)
 bool GrVkGpu::isTestingOnlyBackendTexture(const GrBackendTexture& tex) const {
     SkASSERT(GrBackendApi::kVulkan == tex.fBackend);
 
@@ -2078,7 +2102,9 @@ void GrVkGpu::deleteTestingOnlyBackendRenderTarget(const GrBackendRenderTarget& 
     GrVkImageInfo info;
     if (GrBackendRenderTargets::GetVkImageInfo(rt, &info)) {
         // something in the command buffer may still be using this, so force submit
-        SkAssertResult(this->submitCommandBuffer(kForce_SyncQueue));
+        GrSubmitInfo submitInfo;
+        submitInfo.fSync = GrSyncCpu::kYes;
+        SkAssertResult(this->submitCommandBuffer(submitInfo));
         GrVkImage::DestroyImageInfo(this, const_cast<GrVkImageInfo*>(&info));
     }
 }
@@ -2198,12 +2224,8 @@ void GrVkGpu::takeOwnershipOfBuffer(sk_sp<GrGpuBuffer> buffer) {
     this->currentCommandBuffer()->addGrBuffer(std::move(buffer));
 }
 
-bool GrVkGpu::onSubmitToGpu(GrSyncCpu sync) {
-    if (sync == GrSyncCpu::kYes) {
-        return this->submitCommandBuffer(kForce_SyncQueue);
-    } else {
-        return this->submitCommandBuffer(kSkip_SyncQueue);
-    }
+bool GrVkGpu::onSubmitToGpu(const GrSubmitInfo& info) {
+    return this->submitCommandBuffer(info);
 }
 
 void GrVkGpu::finishOutstandingGpuWork() {
@@ -2566,7 +2588,9 @@ bool GrVkGpu::onReadPixels(GrSurface* surface,
 
     // We need to submit the current command buffer to the Queue and make sure it finishes before
     // we can copy the data out of the buffer.
-    if (!this->submitCommandBuffer(kForce_SyncQueue)) {
+    GrSubmitInfo submitInfo;
+    submitInfo.fSync = GrSyncCpu::kYes;
+    if (!this->submitCommandBuffer(submitInfo)) {
         return false;
     }
     void* mappedMemory = transferBuffer->map();
@@ -2702,7 +2726,7 @@ std::unique_ptr<GrSemaphore> GrVkGpu::prepareTextureForCrossContextUsage(GrTextu
     // TODO: should we have a way to notify the caller that this has failed? Currently if the submit
     // fails (caused by DEVICE_LOST) this will just cause us to fail the next use of the gpu.
     // Eventually we will abandon the whole GPU if this fails.
-    this->submitToGpu(GrSyncCpu::kNo);
+    this->submitToGpu();
 
     // The image layout change serves as a barrier, so no semaphore is needed.
     // If we ever decide we need to return a semaphore here, we need to make sure GrVkSemaphore is
