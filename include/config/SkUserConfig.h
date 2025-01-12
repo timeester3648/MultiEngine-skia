@@ -32,7 +32,7 @@
     here.
 */
 //#define SK_DEBUG
-//#define SK_RELEASE
+#define SK_RELEASE
 
 /*  To write debug messages to a console, skia will call SkDebugf(...) following
     printf conventions (e.g. const char* format, ...). If you want to redirect
@@ -114,8 +114,9 @@
    Skia consumers can provide their own definitions of these macros to
    integrate with their own compilers and build system.
 */
-//#define SK_ALWAYS_INLINE inline __attribute__((always_inline))
-//#define SK_NEVER_INLINE __attribute__((noinline))
+#include <MultiEngine/platform/Platform.h>
+#define SK_ALWAYS_INLINE MLE_FORCE_INLINE
+#define SK_NEVER_INLINE MLE_NO_INLINE
 //#define SK_PRINTF_LIKE(A, B) __attribute__((format(printf, (A), (B))))
 //#define SK_NO_SANITIZE(A) __attribute__((no_sanitize(A)))
 //#define SK_TRIVIAL_ABI [[clang::trivial_abi]]
