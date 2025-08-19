@@ -29,6 +29,9 @@ void main(MultiBuild::Workspace& workspace) {
 
 	properties.defines({
 		"SK_USE_VMA",
+		"SK_VULKAN",
+		"SK_GANESH",
+		"SK_GRAPHITE",
 
 		"SK_TYPEFACE_FACTORY_FREETYPE",
 		"SK_FREETYPE_MINIMUM_RUNTIME_VERSION_IS_BUILD_VERSION",
