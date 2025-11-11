@@ -62,7 +62,7 @@ DEF_SIMPLE_GM(savelayer_initfromprev, canvas, 256, 256) {
     paint.setBlendMode(SkBlendMode::kClear);
     canvas->drawCircle(128, 128, 96, paint);
     canvas->restore();
-};
+}
 
 static void draw_cell(SkCanvas* canvas, sk_sp<SkTextBlob> blob, SkColor c, SkScalar w, SkScalar h,
                       bool useDrawBehind) {
@@ -185,7 +185,6 @@ static void draw_atlas(SkCanvas* canvas, SkImage* image) {
                       xforms,
                       tex,
                       colors,
-                      2,
                       SkBlendMode::kSrcIn,
                       SkFilterMode::kNearest,
                       nullptr,
@@ -210,7 +209,7 @@ static void draw_points(SkCanvas* canvas, SkImage* image) {
     paint.setStrokeWidth(100);
     paint.setStrokeCap(SkPaint::kSquare_Cap);
 
-    canvas->drawPoints(SkCanvas::kPoints_PointMode, 2, pts, paint);
+    canvas->drawPoints(SkCanvas::kPoints_PointMode, pts, paint);
 }
 
 static void draw_image_set(SkCanvas* canvas, SkImage* image) {

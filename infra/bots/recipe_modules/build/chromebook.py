@@ -13,8 +13,6 @@ def compile_fn(api, checkout_root, out_dir):
   top_level = str(api.vars.workdir)
 
   clang_linux = os.path.join(top_level, 'clang_linux')
-  # This is a pretty typical arm-linux-gnueabihf sysroot
-  sysroot_dir = os.path.join(top_level, 'armhf_sysroot')
 
   args = {
     'cc': "%s" % os.path.join(clang_linux, 'bin','clang'),
@@ -22,6 +20,7 @@ def compile_fn(api, checkout_root, out_dir):
     'extra_cflags' : [],
     'extra_ldflags' : [],
     'extra_asmflags' : [],
+    'is_trivial_abi': True,
     'target_cpu': target_arch,
     'skia_use_fontconfig': False,
     'skia_use_system_freetype2': False,
@@ -30,6 +29,9 @@ def compile_fn(api, checkout_root, out_dir):
   }
 
   if 'arm' == target_arch:
+    # This is a pretty typical arm-linux-gnueabihf sysroot
+    sysroot_dir = os.path.join(top_level, 'armhf_sysroot')
+
     # This is the extra things needed to link against for the chromebook.
     #  For example, the Mali GL drivers.
     gl_dir = os.path.join(top_level, 'chromebook_arm_gles')
@@ -66,6 +68,42 @@ def compile_fn(api, checkout_root, out_dir):
       '-L%s' % os.path.join(sysroot_dir, 'lib'),
       '-L%s' % os.path.join(gl_dir, 'lib'),
     ]
+  elif 'arm64' == target_arch:
+    sysroot_dir = os.path.join(top_level, 'arm64_sysroot')
+    gl_dir = os.path.join(top_level, 'chromebook_arm64_gles')
+    env = {'LD_LIBRARY_PATH': os.path.join(sysroot_dir, 'lib')}
+    args['extra_asmflags'] = [
+      '--target=aarch64-linux-gnueabihf',
+      '--sysroot=%s' % sysroot_dir,
+      '-march=armv8-a',
+      '-mfpu=neon',
+      '-mthumb',
+    ]
+
+    args['extra_cflags'] = [
+      '--target=aarch64-linux-gnueabihf',
+      '--sysroot=%s' % sysroot_dir,
+      '-I%s' % os.path.join(sysroot_dir, 'include'),
+      '-I%s' % os.path.join(sysroot_dir, 'include', 'c++', '12'),
+      '-I%s' % os.path.join(sysroot_dir, 'include', 'c++', '12', 'aarch64-linux-gnu'),
+      '-I%s' % os.path.join(gl_dir, 'include'),
+      '-U_GLIBCXX_DEBUG',
+    ]
+
+    args['extra_ldflags'] = [
+      '--target=aarch64-linux-gnueabihf',
+      '--sysroot=%s' % sysroot_dir,
+      '-static-libstdc++', '-static-libgcc',
+      '-fuse-ld=%s' % os.path.join(clang_linux, 'bin', 'ld.lld'),
+      # use sysroot's ld which can properly link things.
+      '-B%s' % os.path.join(sysroot_dir, 'bin'),
+      # helps locate crt*.o
+      '-B%s' % os.path.join(sysroot_dir, 'gcc-cross'),
+      # helps locate libgcc*.so
+      '-L%s' % os.path.join(sysroot_dir, 'gcc-cross'),
+      '-L%s' % os.path.join(sysroot_dir, 'lib'),
+      '-L%s' % os.path.join(gl_dir, 'lib'),
+    ]
   else:
     gl_dir = os.path.join(top_level,'chromebook_x86_64_gles')
     env = {}
@@ -87,6 +125,7 @@ def compile_fn(api, checkout_root, out_dir):
     args['is_debug'] = False
 
   gn = skia_dir.joinpath('bin', 'gn')
+  ninja = skia_dir.joinpath('third_party', 'ninja', 'ninja')
 
   with api.context(cwd=skia_dir, env=env):
     api.run(api.step, 'fetch-gn',
@@ -98,7 +137,7 @@ def compile_fn(api, checkout_root, out_dir):
     api.run(api.step, 'gn gen',
             cmd=[gn, 'gen', out_dir, '--args=' + util.py_to_gn(args)])
     api.run(api.step, 'ninja',
-            cmd=['ninja', '-C', out_dir, 'nanobench', 'dm'])
+            cmd=[ninja, '-C', out_dir, 'nanobench', 'dm'])
 
 
 def copy_build_products(api, src, dst):

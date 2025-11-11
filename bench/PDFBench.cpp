@@ -12,8 +12,10 @@
 #include "include/core/SkExecutor.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathBuilder.h"
 #include "include/core/SkPixmap.h"
 #include "include/core/SkStream.h"
+#include "include/docs/SkPDFJpegHelpers.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/private/base/SkTo.h"
 #include "src/base/SkRandom.h"
@@ -114,7 +116,7 @@ protected:
             SkNullWStream nullStream;
             SkPDFDocument doc(&nullStream, SkPDF::Metadata());
             doc.beginPage(256, 256);
-            (void)SkPDFSerializeImage(fImage.get(), &doc);
+            (void)SkPDFSerializeImage(fImage.get(), &doc, 101);
         }
     }
 
@@ -149,7 +151,7 @@ protected:
             SkNullWStream nullStream;
             SkPDFDocument doc(&nullStream, SkPDF::Metadata());
             doc.beginPage(256, 256);
-            (void)SkPDFSerializeImage(fImage.get(), &doc);
+            (void)SkPDFSerializeImage(fImage.get(), &doc, 101);
         }
     }
 
@@ -267,7 +269,7 @@ struct PDFClipPathBenchmark : public Benchmark {
                 tmp.drawCircle(128, 128, (float)r, paint);
             }
         }
-        fPath.reset();
+        SkPathBuilder builder;
         for (int y = 0; y < 256; ++y) {
             SkColor current = bitmap.getColor(0, y);
             int start = 0;
@@ -279,14 +281,15 @@ struct PDFClipPathBenchmark : public Benchmark {
                 if (color == SK_ColorBLACK) {
                     start = x;
                 } else {
-                    fPath.addRect(SkRect::Make(SkIRect{start, y, x, y + 1}));
+                    builder.addRect(SkRect::Make(SkIRect{start, y, x, y + 1}));
                 }
                 current = color;
             }
             if (current == SK_ColorBLACK) {
-                fPath.addRect(SkRect::Make(SkIRect{start, y, 256, y + 1}));
+                builder.addRect(SkRect::Make(SkIRect{start, y, 256, y + 1}));
             }
         }
+        fPath = builder.detach();
     }
     const char* onGetName() override { return "PDFClipPath"; }
     bool isSuitableFor(Backend backend) override {
@@ -438,6 +441,8 @@ struct PDFBigDocBench : public Benchmark {
             #endif
             SkPDF::Metadata metadata;
             metadata.fExecutor = fExecutor.get();
+            metadata.jpegDecoder = SkPDF::JPEG::Decode;
+            metadata.jpegEncoder = SkPDF::JPEG::Encode;
             auto doc = SkPDF::MakeDocument(&wStream, metadata);
             big_pdf_test(doc.get(), fBackground);
         }

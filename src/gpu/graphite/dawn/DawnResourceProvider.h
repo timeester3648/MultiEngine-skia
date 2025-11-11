@@ -8,7 +8,7 @@
 #ifndef skgpu_graphite_DawnResourceProvider_DEFINED
 #define skgpu_graphite_DawnResourceProvider_DEFINED
 
-#include "include/gpu/graphite/dawn/DawnTypes.h"
+#include "include/gpu/graphite/dawn/DawnGraphiteTypes.h"
 #include "src/core/SkLRUCache.h"
 #include "src/core/SkTHash.h"
 #include "src/gpu/graphite/PipelineData.h"
@@ -30,6 +30,24 @@ public:
 
     static constexpr size_t kNumUniformEntries = 4;
 
+    class BlitWithDrawEncoder {
+    public:
+        BlitWithDrawEncoder(wgpu::RenderPipeline pipeline,
+                            bool srcIsMSAA);
+
+        operator bool() const { return fPipeline != nullptr; }
+
+        void EncodeBlit(const wgpu::Device& device,
+                        const wgpu::RenderPassEncoder& encoder,
+                        const wgpu::TextureView& srcTextureView,
+                        const SkIPoint& srcOffset,
+                        const SkIRect& dstBounds);
+
+    private:
+        wgpu::RenderPipeline fPipeline;
+        const bool fSrcIsMSAA;
+    };
+
     DawnResourceProvider(SharedContext* sharedContext,
                          SingleOwner*,
                          uint32_t recorderID,
@@ -39,15 +57,13 @@ public:
     sk_sp<DawnTexture> findOrCreateDiscardableMSAALoadTexture(SkISize dimensions,
                                                               const TextureInfo& msaaInfo);
 
-    wgpu::RenderPipeline findOrCreateBlitWithDrawPipeline(const RenderPassDesc& renderPassDesc);
+    BlitWithDrawEncoder findOrCreateBlitWithDrawEncoder(const RenderPassDesc& renderPassDesc,
+                                                        int srcSampleCount);
 
     sk_sp<DawnBuffer> findOrCreateDawnBuffer(size_t size,
                                              BufferType type,
                                              AccessPattern,
                                              std::string_view label);
-
-    const wgpu::BindGroupLayout& getOrCreateUniformBuffersBindGroupLayout();
-    const wgpu::BindGroupLayout& getOrCreateSingleTextureSamplerBindGroupLayout();
 
     // Find the cached bind group or create a new one based on the bound buffers and their
     // binding sizes (boundBuffersAndSizes) for these uniforms (in order):
@@ -67,12 +83,6 @@ public:
                                                        UniformDataBlock intrinsicValues);
 
 private:
-    sk_sp<GraphicsPipeline> createGraphicsPipeline(const RuntimeEffectDictionary*,
-                                                   const UniqueKey&,
-                                                   const GraphicsPipelineDesc&,
-                                                   const RenderPassDesc&,
-                                                   SkEnumBitMask<PipelineCreationFlags>,
-                                                   uint32_t compilationID) override;
     sk_sp<ComputePipeline> createComputePipeline(const ComputePipelineDesc&) override;
 
     sk_sp<Texture> createTexture(SkISize, const TextureInfo&) override;
@@ -94,9 +104,6 @@ private:
 
     skia_private::THashMap<uint32_t, wgpu::RenderPipeline> fBlitWithDrawPipelines;
 
-    wgpu::BindGroupLayout fUniformBuffersBindGroupLayout;
-    wgpu::BindGroupLayout fSingleTextureSamplerBindGroupLayout;
-
     wgpu::Buffer fNullBuffer;
 
     template <size_t NumEntries>
@@ -110,6 +117,8 @@ private:
     class IntrinsicBuffer;
     class IntrinsicConstantsManager;
     std::unique_ptr<IntrinsicConstantsManager> fIntrinsicConstantsManager;
+
+    SingleOwner* fSingleOwner = nullptr;
 };
 
 }  // namespace skgpu::graphite

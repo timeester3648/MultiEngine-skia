@@ -33,20 +33,20 @@ public:
     }
     bool supportsPartialLoadResolve() const { return fSupportsPartialLoadResolve; }
 
+    bool isSampleCountSupported(TextureFormat, uint8_t requestedSampleCount) const override;
+    TextureFormat getDepthStencilFormat(SkEnumBitMask<DepthStencilFlags>) const override;
+
+    TextureInfo getDefaultAttachmentTextureInfo(AttachmentDesc,
+                                                Protected,
+                                                Discardable) const override;
     TextureInfo getDefaultSampledTextureInfo(SkColorType,
-                                             Mipmapped mipmapped,
+                                             Mipmapped,
                                              Protected,
                                              Renderable) const override;
-    TextureInfo getTextureInfoForSampledCopy(const TextureInfo& textureInfo,
-                                             Mipmapped mipmapped) const override;
+    TextureInfo getTextureInfoForSampledCopy(const TextureInfo&, Mipmapped) const override;
     TextureInfo getDefaultCompressedTextureInfo(SkTextureCompressionType,
-                                                Mipmapped mipmapped,
+                                                Mipmapped,
                                                 Protected) const override;
-    TextureInfo getDefaultMSAATextureInfo(const TextureInfo& singleSampledInfo,
-                                          Discardable discardable) const override;
-    TextureInfo getDefaultDepthStencilTextureInfo(SkEnumBitMask<DepthStencilFlags>,
-                                                  uint32_t sampleCount,
-                                                  Protected) const override;
     TextureInfo getDefaultStorageTextureInfo(SkColorType) const override;
     SkISize getDepthAttachmentDimensions(const TextureInfo&,
                                          const SkISize colorAttachmentDimensions) const override;
@@ -57,8 +57,9 @@ public:
                               RenderPassDesc*,
                               const RendererProvider*) const override;
     UniqueKey makeComputePipelineKey(const ComputePipelineDesc&) const override;
-    ImmutableSamplerInfo getImmutableSamplerInfo(const TextureProxy* proxy) const override;
-    uint32_t channelMask(const TextureInfo&) const override;
+    ImmutableSamplerInfo getImmutableSamplerInfo(const TextureInfo&) const override;
+    std::string toString(const ImmutableSamplerInfo&) const override;
+
     bool isRenderable(const TextureInfo&) const override;
     bool isStorage(const TextureInfo&) const override;
 
@@ -70,15 +71,28 @@ public:
                             const TextureInfo&,
                             ResourceType,
                             GraphiteResourceKey*) const override;
-    uint32_t getRenderPassDescKeyForPipeline(const RenderPassDesc& renderPassDesc) const;
+    // Compute render pass desc's key as 32 bits key. The key has room for additional flag which can
+    // optionally be provided.
+    uint32_t getRenderPassDescKeyForPipeline(const RenderPassDesc&,
+                                             bool additionalFlag = false) const;
 
     bool supportsCommandBufferTimestamps() const { return fSupportsCommandBufferTimestamps; }
+
+    // Whether we should emulate load/resolve with separate render passes.
+    // TODO(b/399640773): This is currently used until Dawn supports true partial resolve feature
+    // that can resolve a MSAA texture to a resolve texture with different size.
+    bool emulateLoadStoreResolve() const { return fEmulateLoadStoreResolve; }
+
+    // Check whether the texture is texturable, ignoring its sample count. This is needed
+    // instead of isTextureable() because graphite frontend treats multisampled textures as
+    // non-textureable.
+    bool isTexturableIgnoreSampleCount(const TextureInfo& info) const;
 
 private:
     const ColorTypeInfo* getColorTypeInfo(SkColorType, const TextureInfo&) const override;
     bool onIsTexturable(const TextureInfo&) const override;
-    bool supportsWritePixels(const TextureInfo& textureInfo) const override;
-    bool supportsReadPixels(const TextureInfo& textureInfo) const override;
+    bool supportsWritePixels(const TextureInfo&) const override;
+    bool supportsReadPixels(const TextureInfo&) const override;
     std::pair<SkColorType, bool /*isRGBFormat*/> supportedWritePixelsColorType(
             SkColorType dstColorType,
             const TextureInfo& dstTextureInfo,
@@ -88,18 +102,14 @@ private:
             const TextureInfo& srcTextureInfo,
             SkColorType dstColorType) const override;
 
-    void initCaps(const DawnBackendContext& backendContext, const ContextOptions& options);
-    void initShaderCaps(const wgpu::Device& device);
-    void initFormatTable(const wgpu::Device& device);
+    void initCaps(const DawnBackendContext&, const ContextOptions&);
+    void initShaderCaps(const wgpu::Device&);
+    void initFormatTable(const wgpu::Device&);
 
     wgpu::TextureFormat getFormatFromColorType(SkColorType colorType) const {
         int idx = static_cast<int>(colorType);
         return fColorTypeToFormatTable[idx];
     }
-
-    uint32_t maxRenderTargetSampleCount(wgpu::TextureFormat format) const;
-    bool isTexturable(wgpu::TextureFormat format) const;
-    bool isRenderable(wgpu::TextureFormat format, uint32_t numSamples) const;
 
     struct FormatInfo {
         uint32_t colorTypeFlags(SkColorType colorType) const {
@@ -113,7 +123,7 @@ private:
 
         enum {
             kTexturable_Flag  = 0x01,
-            kRenderable_Flag  = 0x02, // Color attachment and blendable
+            kRenderable_Flag  = 0x02, // Render attachment (color or depth/stencil)
             kMSAA_Flag        = 0x04,
             kResolve_Flag     = 0x08,
             kStorage_Flag     = 0x10,
@@ -148,6 +158,8 @@ private:
     // and resolve. With this feature, we can do that partially according to the actual damage
     // region.
     bool fSupportsPartialLoadResolve = false;
+
+    bool fEmulateLoadStoreResolve = false;
 
     bool fUseAsyncPipelineCreation = true;
     bool fAllowScopedErrorChecks = true;

@@ -4,20 +4,25 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #ifndef skgpu_graphite_DrawAtlas_DEFINED
 #define skgpu_graphite_DrawAtlas_DEFINED
 
-#include <cmath>
+#include "include/core/SkPoint.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSize.h"
+#include "include/private/base/SkAssert.h"
+#include "include/private/base/SkDebug.h"
+#include "src/gpu/AtlasTypes.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "src/core/SkIPoint16.h"
-#include "src/core/SkTHash.h"
-#include "src/gpu/AtlasTypes.h"
-
 class SkAutoPixmapStorage;
+enum SkColorType : int;
 
 namespace skgpu::graphite {
 
@@ -124,6 +129,9 @@ public:
     uint32_t numActivePages() const { return fNumActivePages; }
     unsigned int numPlots() const { return fNumPlots; }
     SkISize plotSize() const { return {fPlotWidth, fPlotHeight}; }
+    uint32_t getListIndex(const PlotLocator& locator) {
+        return locator.pageIndex() * fNumPlots + locator.plotIndex();
+    }
 
     bool hasID(const PlotLocator& plotLocator) {
         if (!plotLocator.isValid()) {
@@ -138,13 +146,12 @@ public:
     }
 
     /** To ensure the atlas does not evict a given entry, the client must set the last use token. */
-    void setLastUseToken(const AtlasLocator& atlasLocator, AtlasToken token) {
+    void setLastUseToken(const AtlasLocator& atlasLocator, Token token) {
         Plot* plot = this->findPlot(atlasLocator);
         this->internalSetLastUseToken(plot, atlasLocator.pageIndex(), token);
     }
 
-    void setLastUseTokenBulk(const BulkUsePlotUpdater& updater,
-                             AtlasToken token) {
+    void setLastUseTokenBulk(const BulkUsePlotUpdater& updater, Token token) {
         int count = updater.count();
         for (int i = 0; i < count; i++) {
             const BulkUsePlotUpdater::PlotData& pd = updater.plotData(i);
@@ -157,11 +164,15 @@ public:
         }
     }
 
-    void compact(AtlasToken startTokenForNextFlush, bool forceCompact);
+    void compact(Token startTokenForNextFlush);
 
     // Mark all plots with any content as full. Used only with Vello because it can't do
     // new renders to a texture without a clear.
     void markUsedPlotsAsFull();
+
+    // Will try to clear out any GPU resources that aren't needed for any pending uploads or draws.
+    // TODO: Delete backing data for Plots that don't have pending uploads.
+    void freeGpuResources(Token token);
 
     void evictAllPlots();
 
@@ -169,8 +180,26 @@ public:
         return fMaxPages;
     }
 
-    int numAllocated_TestingOnly() const;
-    void setMaxPages_TestingOnly(uint32_t maxPages);
+#if defined(GPU_TEST_UTILS)
+    template <typename F>
+    int iteratePlots(F&& func) const {
+        int count = 0;
+        PlotList::Iter plotIter;
+        for (uint32_t pageIndex = 0; pageIndex < this->maxPages(); ++pageIndex) {
+            plotIter.init(fPages[pageIndex].fPlotList, PlotList::Iter::kHead_IterStart);
+            while (Plot* plot = plotIter.get()) {
+                if (func(plot)) {
+                    count++;
+                }
+                plotIter.next();
+            }
+        }
+        return count;
+    }
+
+    int numAllocatedPlots() const;
+    int numNonEmptyPlots() const;
+#endif
 
 private:
     DrawAtlas(SkColorType, size_t bpp,
@@ -203,7 +232,7 @@ private:
         return fPages[pageIdx].fPlotArray[plotIdx].get();
     }
 
-    void internalSetLastUseToken(Plot* plot, uint32_t pageIdx, AtlasToken token) {
+    void internalSetLastUseToken(Plot* plot, uint32_t pageIdx, Token token) {
         this->makeMRU(plot, pageIdx);
         plot->setLastUseToken(token);
     }
@@ -212,11 +241,9 @@ private:
     bool activateNewPage(Recorder*);
     void deactivateLastPage();
 
-    void processEviction(PlotLocator);
-    inline void processEvictionAndResetRects(Plot* plot) {
-        this->processEviction(plot->plotLocator());
-        plot->resetRects();
-    }
+    // If freeData is true, this will free the backing data as well. This should only be used
+    // when we know we won't be adding to the Plot immediately afterwards.
+    void processEvictionAndResetRects(Plot* plot, bool freeData);
 
     SkColorType           fColorType;
     size_t                fBytesPerPixel;
@@ -239,7 +266,7 @@ private:
 
     // nextFlushToken() value at the end of the previous DrawPass
     // TODO: rename
-    AtlasToken fPrevFlushToken;
+    Token fPrevFlushToken;
 
     // the number of flushes since this atlas has been last used
     // TODO: rename

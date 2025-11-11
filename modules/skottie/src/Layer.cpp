@@ -13,6 +13,7 @@
 #include "include/core/SkPathTypes.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkScalar.h"
+#include "include/core/SkString.h"
 #include "include/core/SkTileMode.h"
 #include "include/private/base/SkAssert.h"
 #include "include/private/base/SkTArray.h"
@@ -25,7 +26,6 @@
 #include "modules/skottie/src/SkottieValue.h"
 #include "modules/skottie/src/animator/Animator.h"
 #include "modules/skottie/src/effects/Effects.h"
-#include "modules/skottie/src/effects/MotionBlurEffect.h"
 #include "modules/sksg/include/SkSGClipEffect.h"
 #include "modules/sksg/include/SkSGDraw.h"
 #include "modules/sksg/include/SkSGGeometryNode.h"
@@ -39,6 +39,7 @@
 #include "modules/sksg/include/SkSGRenderNode.h"
 #include "modules/sksg/include/SkSGTransform.h"
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -306,24 +307,6 @@ private:
                                   fOut;
 };
 
-class MotionBlurController final : public Animator {
-public:
-    explicit MotionBlurController(sk_sp<MotionBlurEffect> mbe)
-        : fMotionBlurEffect(std::move(mbe)) {}
-
-protected:
-    // When motion blur is present, time ticks are not passed to layer animators
-    // but to the motion blur effect. The effect then drives the animators/scene-graph
-    // during reval and render phases.
-    StateChanged onSeek(float t) override {
-        fMotionBlurEffect->setT(t);
-        return true;
-    }
-
-private:
-    const sk_sp<MotionBlurEffect> fMotionBlurEffect;
-};
-
 // AE is annoyingly inconsistent in how effects interact with layer transforms: depending on
 // the layer type, effects are applied before or after the content is transformed.
 //
@@ -343,7 +326,8 @@ LayerBuilder::LayerBuilder(const skjson::ObjectValue& jlayer, const SkSize& comp
     , fParentIndex(ParseDefault<int>(jlayer["parent"], -1))
     , fType       (ParseDefault<int>(jlayer["ty"    ], -1))
     , fAutoOrient (ParseDefault<int>(jlayer["ao"    ],  0))
-    , fInfo{comp_size,
+    , fInfo{ParseDefault<SkString>(jlayer["nm"], SkString()),
+            comp_size,
             ParseDefault<float>(jlayer["ip"], 0.0f),
             ParseDefault<float>(jlayer["op"], 0.0f)}
 {
@@ -454,12 +438,6 @@ sk_sp<sksg::Transform> LayerBuilder::doAttachTransform(const AnimationBuilder& a
             : abuilder.attachMatrix2D(*jtransform, std::move(parent_transform), fAutoOrient);
 }
 
-bool LayerBuilder::hasMotionBlur(const CompositionBuilder* cbuilder) const {
-    return cbuilder->fMotionBlurSamples > 1
-        && cbuilder->fMotionBlurAngle   > 0
-        && ParseDefault(fJlayer["mb"], false);
-}
-
 const sk_sp<sksg::RenderNode>& LayerBuilder::getContentTree(const AnimationBuilder& abuilder,
                                                             CompositionBuilder* cbuilder) {
     if (!(fFlags & kBuiltContent)) {
@@ -538,6 +516,7 @@ sk_sp<sksg::RenderNode> LayerBuilder::buildContentTree(const AnimationBuilder& a
     // Stash the layer animator scope, to be picked up later in buildRenderTree().
     fLayerScope = ascope.release();
 
+    abuilder.trackLayerInfo(fInfo);
     return layer;
 }
 
@@ -546,36 +525,27 @@ sk_sp<sksg::RenderNode> LayerBuilder::buildRenderTree(const AnimationBuilder& ab
                                                       int prev_layer_index) {
     sk_sp<sksg::RenderNode> layer = this->getContentTree(abuilder, cbuilder);
 
-    if (ParseDefault<bool>(fJlayer["hd"], false)) {
-        layer = nullptr;
-    }
-
-    const auto has_animators    = !abuilder.fCurrentAnimatorScope->empty();
     const auto force_seek_count = fBuilderInfo.fFlags & kForceSeek
             ? fLayerScope.size()
             : fTransformAnimatorCount;
 
-    sk_sp<Animator> controller = sk_make_sp<LayerController>(std::move(fLayerScope),
-                                                             layer,
-                                                             force_seek_count,
-                                                             fInfo.fInPoint,
-                                                             fInfo.fOutPoint);
+    abuilder.fCurrentAnimatorScope->push_back(sk_make_sp<LayerController>(std::move(fLayerScope),
+                                                                          layer,
+                                                                          force_seek_count,
+                                                                          fInfo.fInPoint,
+                                                                          fInfo.fOutPoint));
+    const auto& is_hidden = [this]() {
+        // If present, the 'hd' property controls visibility.
+        if (const skjson::BoolValue* jhidden = fJlayer["hd"]) {
+            return **jhidden;
+        }
 
-    // Optional motion blur.
-    if (layer && has_animators && this->hasMotionBlur(cbuilder)) {
-        // Wrap both the layer node and the controller.
-        auto motion_blur = MotionBlurEffect::Make(std::move(controller), std::move(layer),
-                                                  cbuilder->fMotionBlurSamples,
-                                                  cbuilder->fMotionBlurAngle,
-                                                  cbuilder->fMotionBlurPhase);
-        controller = sk_make_sp<MotionBlurController>(motion_blur);
-        layer = std::move(motion_blur);
-    }
+        // Legacy track matte flag, not supported in Lottie >= 1.0.
+        // We only observe this in the absence of an explicit `hd` property.
+        return ParseDefault<bool>(fJlayer["td"], false);
+    };
 
-    abuilder.fCurrentAnimatorScope->push_back(std::move(controller));
-
-    if (ParseDefault<bool>(fJlayer["td"], false)) {
-        // |layer| is a track matte.  We apply it as a mask to the next layer.
+    if (is_hidden()) {
         return nullptr;
     }
 

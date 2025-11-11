@@ -8,6 +8,7 @@
 #include "src/gpu/graphite/render/CoverBoundsRenderStep.h"
 
 #include "include/core/SkM44.h"
+#include "include/private/base/SkDebug.h"
 #include "src/base/SkEnumBitMask.h"
 #include "src/base/SkVx.h"
 #include "src/core/SkSLTypeShared.h"
@@ -17,29 +18,30 @@
 #include "src/gpu/graphite/DrawParams.h"
 #include "src/gpu/graphite/DrawTypes.h"
 #include "src/gpu/graphite/DrawWriter.h"
+#include "src/gpu/graphite/PipelineData.h"
 #include "src/gpu/graphite/geom/Geometry.h"
 #include "src/gpu/graphite/geom/Rect.h"
 #include "src/gpu/graphite/geom/Shape.h"
-#include "src/gpu/graphite/geom/Transform_graphite.h"
-
-#include <string_view>
+#include "src/gpu/graphite/geom/Transform.h"
 
 namespace skgpu::graphite {
 
-CoverBoundsRenderStep::CoverBoundsRenderStep(const char* tag, DepthStencilSettings dsSettings)
-        : RenderStep("CoverBoundsRenderStep",
-                     tag,
-                     Flags::kPerformsShading,
+CoverBoundsRenderStep::CoverBoundsRenderStep(RenderStep::RenderStepID renderStepID,
+                                             DepthStencilSettings dsSettings)
+        : RenderStep(renderStepID,
+                     Flags::kPerformsShading |
+                     Flags::kAppendInstances |
+                     Flags::kInverseFillsScissor,
                      /*uniforms=*/{},
                      PrimitiveType::kTriangleStrip,
                      dsSettings,
-                     /*vertexAttrs=*/  {},
-                     /*instanceAttrs=*/{{"bounds", VertexAttribType::kFloat4, SkSLType::kFloat4},
-                                        {"depth", VertexAttribType::kFloat, SkSLType::kFloat},
-                                        {"ssboIndices", VertexAttribType::kUInt2, SkSLType::kUInt2},
-                                        {"mat0", VertexAttribType::kFloat3, SkSLType::kFloat3},
-                                        {"mat1", VertexAttribType::kFloat3, SkSLType::kFloat3},
-                                        {"mat2", VertexAttribType::kFloat3, SkSLType::kFloat3}}) {}
+                     /*staticAttrs=*/ {},
+                     /*appendAttrs=*/{{"bounds", VertexAttribType::kFloat4, SkSLType::kFloat4},
+                                      {"depth", VertexAttribType::kFloat, SkSLType::kFloat},
+                                      {"ssboIndices", VertexAttribType::kUInt2, SkSLType::kUInt2},
+                                      {"mat0", VertexAttribType::kFloat3, SkSLType::kFloat3},
+                                      {"mat1", VertexAttribType::kFloat3, SkSLType::kFloat3},
+                                      {"mat2", VertexAttribType::kFloat3, SkSLType::kFloat3}}) {}
 
 CoverBoundsRenderStep::~CoverBoundsRenderStep() {}
 
@@ -66,7 +68,7 @@ void CoverBoundsRenderStep::writeVertices(DrawWriter* writer,
         // device space and then the VS will use the inverse of the transform to compute local
         // coordinates.
         bounds = skvx::shuffle</*R*/2, /*B*/3, /*L*/0, /*T*/1>(
-                skvx::cast<float>(skvx::int4::Load(&params.clip().scissor())));
+                skvx::cast<float>(skvx::int4::Load(&params.scissor())));
     } else {
         bounds = params.geometry().bounds().ltrb();
     }
@@ -80,8 +82,9 @@ void CoverBoundsRenderStep::writeVertices(DrawWriter* writer,
 }
 
 void CoverBoundsRenderStep::writeUniformsAndTextures(const DrawParams&,
-                                                     PipelineDataGatherer*) const {
+                                                     PipelineDataGatherer* gatherer) const {
     // All data is uploaded as instance attributes, so no uniforms are needed.
+    SkDEBUGCODE(gatherer->checkRewind());
 }
 
 }  // namespace skgpu::graphite

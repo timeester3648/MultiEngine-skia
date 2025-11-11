@@ -4,62 +4,102 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-
 #include "include/gpu/graphite/Context.h"
 
+#include "include/core/SkAlphaType.h"
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColorFilter.h"
 #include "include/core/SkColorSpace.h"
-#include "include/core/SkPathTypes.h"
-#include "include/core/SkTraceMemoryDump.h"
-#include "include/effects/SkRuntimeEffect.h"
+#include "include/core/SkColorType.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkSize.h"
+#include "include/core/SkSurface.h"
+#include "include/core/SkTileMode.h"
+#include "include/core/SkTypes.h"
+#include "include/gpu/GpuTypes.h"
 #include "include/gpu/graphite/BackendTexture.h"
+#include "include/gpu/graphite/ContextOptions.h"
+#include "include/gpu/graphite/GraphiteTypes.h"
 #include "include/gpu/graphite/PrecompileContext.h"
 #include "include/gpu/graphite/Recorder.h"
-#include "include/gpu/graphite/Recording.h"
 #include "include/gpu/graphite/Surface.h"
-#include "include/gpu/graphite/TextureInfo.h"
+#include "include/private/base/SingleOwner.h"
+#include "include/private/base/SkAlign.h"
+#include "include/private/base/SkMutex.h"
 #include "include/private/base/SkOnce.h"
+#include "include/private/base/SkTArray.h"
+#include "include/private/base/SkTo.h"
+#include "src/base/SkEnumBitMask.h"
 #include "src/base/SkRectMemcpy.h"
+#include "src/capture/SkCapture.h"
+#include "src/capture/SkCaptureManager.h"
 #include "src/core/SkAutoPixmapStorage.h"
-#include "src/core/SkColorFilterPriv.h"
+#include "src/core/SkCPUContextImpl.h"
+#include "src/core/SkCPURecorderImpl.h"
 #include "src/core/SkConvertPixels.h"
+#include "src/core/SkImageInfoPriv.h"
 #include "src/core/SkTraceEvent.h"
 #include "src/core/SkYUVMath.h"
-#include "src/gpu/RefCntedCallback.h"
+#include "src/gpu/AsyncReadTypes.h"
+#include "src/gpu/GpuTypesPriv.h"
+#include "src/gpu/SkBackingFit.h"
 #include "src/gpu/graphite/AtlasProvider.h"
+#include "src/gpu/graphite/Buffer.h"
 #include "src/gpu/graphite/BufferManager.h"
 #include "src/gpu/graphite/Caps.h"
 #include "src/gpu/graphite/ClientMappedBufferManager.h"
-#include "src/gpu/graphite/CommandBuffer.h"
 #include "src/gpu/graphite/ContextPriv.h"
-#include "src/gpu/graphite/DrawAtlas.h"
 #include "src/gpu/graphite/GlobalCache.h"
-#include "src/gpu/graphite/GraphicsPipeline.h"
-#include "src/gpu/graphite/GraphicsPipelineDesc.h"
-#include "src/gpu/graphite/Image_Base_Graphite.h"
 #include "src/gpu/graphite/Image_Graphite.h"
-#include "src/gpu/graphite/KeyContext.h"
 #include "src/gpu/graphite/Log.h"
 #include "src/gpu/graphite/QueueManager.h"
 #include "src/gpu/graphite/RecorderPriv.h"
-#include "src/gpu/graphite/RecordingPriv.h"
-#include "src/gpu/graphite/Renderer.h"
 #include "src/gpu/graphite/RendererProvider.h"
 #include "src/gpu/graphite/ResourceProvider.h"
+#include "src/gpu/graphite/ResourceTypes.h"
 #include "src/gpu/graphite/RuntimeEffectDictionary.h"
-#include "src/gpu/graphite/ShaderCodeDictionary.h"
 #include "src/gpu/graphite/SharedContext.h"
 #include "src/gpu/graphite/Surface_Graphite.h"
+#include "src/gpu/graphite/TextureProxy.h"
 #include "src/gpu/graphite/TextureProxyView.h"
 #include "src/gpu/graphite/TextureUtils.h"
 #include "src/gpu/graphite/task/CopyTask.h"
 #include "src/gpu/graphite/task/SynchronizeToCpuTask.h"
-#include "src/gpu/graphite/task/UploadTask.h"
+#include "src/gpu/graphite/task/Task.h"
 #include "src/image/SkSurface_Base.h"
 #include "src/sksl/SkSLGraphiteModules.h"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <forward_list>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #if defined(GPU_TEST_UTILS)
 #include "src/gpu/graphite/ContextOptionsPriv.h"
 #endif
+
+class SkTraceMemoryDump;
+
+namespace skgpu::graphite { class Recording; }
 
 namespace skgpu::graphite {
 
@@ -98,6 +138,17 @@ Context::Context(sk_sp<SharedContext> sharedContext,
         fStoreContextRefInRecorder = options.fOptionsPriv->fStoreContextRefInRecorder;
     }
 #endif
+
+    fSharedContext->globalCache()->setPipelineCallback(options.fPipelineCallbackContext,
+                                                       options.fPipelineCachingCallback,
+                                                       options.fPipelineCallback);
+
+    fCPUContext = std::make_unique<skcpu::ContextImpl>();
+    if (options.fEnableCapture) {
+        fSharedContext->setCaptureManager(sk_make_sp<SkCaptureManager>());
+    }
+
+    fPersistentPipelineStorage = options.fPersistentPipelineStorage;
 }
 
 Context::~Context() {
@@ -109,8 +160,19 @@ Context::~Context() {
 #endif
 }
 
+Context::PixelTransferResult::PixelTransferResult() = default;
+Context::PixelTransferResult::PixelTransferResult(const PixelTransferResult&) = default;
+Context::PixelTransferResult::PixelTransferResult(PixelTransferResult&&) = default;
+Context::PixelTransferResult& Context::PixelTransferResult::operator=(const PixelTransferResult&) = default;
+Context::PixelTransferResult::~PixelTransferResult() = default;
+
 bool Context::finishInitialization() {
     SkASSERT(!fSharedContext->rendererProvider()); // Can only initialize once
+
+    if (!fSharedContext->globalCache()->initializeDynamicSamplers(fResourceProvider.get(),
+                                                                  fSharedContext->caps())) {
+        return false;
+    }
 
     StaticBufferManager bufferManager{fResourceProvider.get(), fSharedContext->caps()};
     std::unique_ptr<RendererProvider> renderers{
@@ -123,7 +185,7 @@ bool Context::finishInitialization() {
         return false;
     }
     if (result == StaticBufferManager::FinishResult::kSuccess &&
-        !fQueueManager->submitToGpu()) {
+        !fQueueManager->submitToGpu(/*submitInfo=*/{})) {
         SKGPU_LOG_W("Failed to submit initial command buffer for Context creation.\n");
         return false;
     } // else result was kNoWork so skip submitting to the GPU
@@ -146,6 +208,12 @@ std::unique_ptr<Recorder> Context::makeRecorder(const RecorderOptions& options) 
     return recorder;
 }
 
+std::unique_ptr<skcpu::Recorder> Context::makeCPURecorder() {
+    ASSERT_SINGLE_OWNER
+
+    return std::make_unique<skcpu::RecorderImpl>(fCPUContext.get());
+}
+
 std::unique_ptr<PrecompileContext> Context::makePrecompileContext() {
     ASSERT_SINGLE_OWNER
 
@@ -155,30 +223,35 @@ std::unique_ptr<PrecompileContext> Context::makePrecompileContext() {
 std::unique_ptr<Recorder> Context::makeInternalRecorder() const {
     ASSERT_SINGLE_OWNER
 
-    // Unlike makeRecorder(), this Recorder is meant to be short-lived and go
-    // away before a Context public API function returns to the caller. As such
-    // it shares the Context's resource provider (no separate budget) and does
-    // not get tracked. The internal drawing performed with an internal recorder
-    // should not require a client image provider.
-    return std::unique_ptr<Recorder>(new Recorder(fSharedContext, {}, this));
+    // Unlike makeRecorder(), this Recorder is meant to be short-lived and go away before a Context
+    // public API function returns to the caller. As such it shares the Context's resource provider
+    // (no separate budget) and does not get tracked. The internal drawing performed with an
+    // internal recorder should not require a client image provider.
+    //
+    // Explicitly overrides fRequiresOrderedRecordings to false so that these Recorders do not
+    // inherit any global policy from the ContextOptions. Since they will only produce one Recording
+    // there's no need to require subsequent recordings be ordered.
+    RecorderOptions options = {};
+    options.fRequireOrderedRecordings = false;
+    return std::unique_ptr<Recorder>(new Recorder(fSharedContext, options, this));
 }
 
-bool Context::insertRecording(const InsertRecordingInfo& info) {
+InsertStatus Context::insertRecording(const InsertRecordingInfo& info) {
     ASSERT_SINGLE_OWNER
 
     return fQueueManager->addRecording(info, this);
 }
 
-bool Context::submit(SyncToCpu syncToCpu) {
+bool Context::submit(SubmitInfo submitInfo) {
     ASSERT_SINGLE_OWNER
 
-    if (syncToCpu == SyncToCpu::kYes && !fSharedContext->caps()->allowCpuSync()) {
+    if (submitInfo.fSync == SyncToCpu::kYes && !fSharedContext->caps()->allowCpuSync()) {
         SKGPU_LOG_E("SyncToCpu::kYes not supported with ContextOptions::fNeverYieldToWebGPU. "
                     "The parameter is ignored and no synchronization will occur.");
-        syncToCpu = SyncToCpu::kNo;
+        submitInfo.fSync = SyncToCpu::kNo;
     }
-    bool success = fQueueManager->submitToGpu();
-    this->checkForFinishedWork(syncToCpu);
+    bool success = fQueueManager->submitToGpu(submitInfo);
+    this->checkForFinishedWork(submitInfo.fSync);
     return success;
 }
 
@@ -207,7 +280,10 @@ struct Context::AsyncParams {
         if (!fSrcImage) {
             return false;
         }
-        if (fSrcImage->isProtected()) {
+        // SkImage::isProtected() -> bool, TextureProxy::isProtected() -> Protected enum.
+        // The explicit cast makes this function work for both template instantiations since
+        // the Protected enum is backed by a bool.
+        if ((bool) fSrcImage->isProtected()) {
             return false;
         }
         if (!SkIRect::MakeSize(fSrcImage->dimensions()).contains(fSrcRect)) {
@@ -311,6 +387,7 @@ void Context::asyncReadPixels(std::unique_ptr<Recorder> recorder,
             recorder = this->makeInternalRecorder();
         }
         sk_sp<SkImage> flattened = CopyAsDraw(recorder.get(),
+                                              /*drawContext=*/nullptr,
                                               params.fSrcImage,
                                               params.fSrcRect,
                                               params.fDstImageInfo.colorInfo(),
@@ -678,7 +755,7 @@ Context::PixelTransferResult Context::transferPixels(Recorder* recorder,
     int bpp = isRGB888Format ? 3 : SkColorTypeBytesPerPixel(supportedColorType);
     size_t rowBytes = caps->getAlignedTextureDataRowBytes(bpp * srcRect.width());
     size_t size = SkAlignTo(rowBytes * srcRect.height(), caps->requiredTransferBufferAlignment());
-    sk_sp<Buffer> buffer = fResourceProvider->findOrCreateBuffer(
+    sk_sp<Buffer> buffer = fResourceProvider->findOrCreateNonShareableBuffer(
             size, BufferType::kXferGpuToCpu, AccessPattern::kHostVisible, "TransferToCpu");
     if (!buffer) {
         return {};
@@ -758,6 +835,9 @@ void Context::checkForFinishedWork(SyncToCpu syncToCpu) {
 
     fQueueManager->checkForFinishedWork(syncToCpu);
     fMappedBufferManager->process();
+    // Process the return queue periodically to make sure it doesn't get too big
+    fResourceProvider->forceProcessReturnedResources();
+    fSharedContext->forceProcessReturnedResources();
 }
 
 void Context::checkAsyncWorkCompletion() {
@@ -779,6 +859,7 @@ void Context::freeGpuResources() {
     this->checkAsyncWorkCompletion();
 
     fResourceProvider->freeGpuResources();
+    fSharedContext->freeGpuResources();
 }
 
 void Context::performDeferredCleanup(std::chrono::milliseconds msNotUsed) {
@@ -788,20 +869,24 @@ void Context::performDeferredCleanup(std::chrono::milliseconds msNotUsed) {
 
     auto purgeTime = skgpu::StdSteadyClock::now() - msNotUsed;
     fResourceProvider->purgeResourcesNotUsedSince(purgeTime);
+    fSharedContext->purgeResourcesNotUsedSince(purgeTime);
 }
 
 size_t Context::currentBudgetedBytes() const {
     ASSERT_SINGLE_OWNER
+    SkASSERT(fSharedContext->getResourceCacheCurrentBudgetedBytes() == 0);
     return fResourceProvider->getResourceCacheCurrentBudgetedBytes();
 }
 
 size_t Context::currentPurgeableBytes() const {
     ASSERT_SINGLE_OWNER
+    SkASSERT(fSharedContext->getResourceCacheCurrentPurgeableBytes() == 0);
     return fResourceProvider->getResourceCacheCurrentPurgeableBytes();
 }
 
 size_t Context::maxBudgetedBytes() const {
     ASSERT_SINGLE_OWNER
+    SkASSERT(fSharedContext->getResourceCacheLimit() == SharedContext::kThreadedSafeResourceBudget);
     return fResourceProvider->getResourceCacheLimit();
 }
 
@@ -813,6 +898,7 @@ void Context::setMaxBudgetedBytes(size_t bytes) {
 void Context::dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const {
     ASSERT_SINGLE_OWNER
     fResourceProvider->dumpMemoryStatistics(traceMemoryDump);
+    fSharedContext->dumpMemoryStatistics(traceMemoryDump);
     // TODO: What is the graphite equivalent for the text blob cache and how do we print out its
     // used bytes here (see Ganesh implementation).
 }
@@ -831,6 +917,28 @@ bool Context::supportsProtectedContent() const {
 
 GpuStatsFlags Context::supportedGpuStats() const {
     return fSharedContext->caps()->supportedGpuStats();
+}
+
+void Context::syncPipelineData(size_t maxSize) {
+    ASSERT_SINGLE_OWNER
+
+    if (fPersistentPipelineStorage) {
+        fSharedContext->syncPipelineData(fPersistentPipelineStorage, maxSize);
+    }
+}
+
+void Context::startCapture() {
+    if (fSharedContext->captureManager()) {
+        fSharedContext->captureManager()->toggleCapture(true);
+    }
+}
+
+sk_sp<SkCapture> Context::endCapture() {
+    if (fSharedContext->captureManager()) {
+        fSharedContext->captureManager()->toggleCapture(false);
+        return fSharedContext->captureManager()->getLastCapture();
+    }
+    return nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////

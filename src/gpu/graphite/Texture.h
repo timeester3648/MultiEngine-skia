@@ -13,13 +13,17 @@
 #include "src/gpu/graphite/Resource.h"
 #include "src/gpu/graphite/ResourceTypes.h"
 
+class SkColorInfo;
+
 namespace skgpu {
 class MutableTextureState;
 class RefCntedCallback;
 enum class Budgeted : bool;
-};
+}
 
 namespace skgpu::graphite {
+
+class UploadSource;
 
 class Texture : public Resource {
 public:
@@ -37,10 +41,17 @@ public:
 
     const Texture* asTexture() const override { return this; }
 
+    virtual bool canUploadOnHost(const UploadSource&) const { return false; }
+
+    // With the assumption that source.canUploadOnHost() is true, attempts to write to the
+    // texture on the host directly. Returns `false` only if driver calls fail.
+    virtual bool uploadDataOnHost(const UploadSource& source, const SkIRect& dstRect);
+
 protected:
     Texture(const SharedContext*,
             SkISize dimensions,
             const TextureInfo& info,
+            bool isTransient,
             sk_sp<MutableTextureState> mutableState,
             Ownership);
 

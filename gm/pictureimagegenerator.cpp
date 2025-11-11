@@ -18,6 +18,7 @@
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathBuilder.h"
 #include "include/core/SkPicture.h"
 #include "include/core/SkPictureRecorder.h"
 #include "include/core/SkPoint.h"
@@ -31,7 +32,6 @@
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTypes.h"
 #include "include/effects/SkGradientShader.h"
-#include "include/pathops/SkPathOps.h"
 #include "include/utils/SkTextUtils.h"
 #include "src/image/SkImageGeneratorPriv.h"
 #include "tools/ToolUtils.h"
@@ -54,33 +54,35 @@ static void draw_vector_logo(SkCanvas* canvas, const SkRect& viewBox) {
     font.setEmbolden(true);
 
     SkPath path;
-    SkRect iBox, skiBox, skiaBox;
     SkTextUtils::GetPath("SKI", 3, SkTextEncoding::kUTF8, 0, 0, font, &path);
-    TightBounds(path, &skiBox);
+    auto skiBox = path.computeTightBounds();
+
     SkTextUtils::GetPath("I", 1, SkTextEncoding::kUTF8, 0, 0, font, &path);
-    TightBounds(path, &iBox);
+    auto iBox = path.computeTightBounds();
     iBox.offsetTo(skiBox.fRight - iBox.width(), iBox.fTop);
 
     const size_t textLen = strlen(kSkiaStr);
     SkTextUtils::GetPath(kSkiaStr, textLen, SkTextEncoding::kUTF8, 0, 0, font, &path);
-    TightBounds(path, &skiaBox);
+    auto skiaBox = path.computeTightBounds();
     skiaBox.outset(0, 2 * iBox.width() * (kVerticalSpacing + 1));
 
     const SkScalar accentSize = iBox.width() * kAccentScale;
     const SkScalar underlineY = iBox.bottom() +
         (kVerticalSpacing + SkScalarSqrt(3) / 2) * accentSize;
     SkAutoCanvasRestore acr(canvas, true);
-    canvas->concat(SkMatrix::RectToRect(skiaBox, viewBox));
+    canvas->concat(SkMatrix::RectToRectOrIdentity(skiaBox, viewBox));
 
     canvas->drawCircle(iBox.centerX(),
                        iBox.y() - (0.5f + kVerticalSpacing) * accentSize,
                        accentSize / 2,
                        paint);
 
-    path.reset();
-    path.moveTo(iBox.centerX() - accentSize / 2, iBox.bottom() + kVerticalSpacing * accentSize);
-    path.rLineTo(accentSize, 0);
-    path.lineTo(iBox.centerX(), underlineY);
+    path = SkPathBuilder()
+           .moveTo(iBox.centerX() - accentSize / 2,
+                   iBox.bottom() + kVerticalSpacing * accentSize)
+           .rLineTo(accentSize, 0)
+           .lineTo(iBox.centerX(), underlineY)
+           .detach();
     canvas->drawPath(path, paint);
 
     SkRect underlineRect = SkRect::MakeLTRB(iBox.centerX() - iBox.width() * accentSize * 3,

@@ -15,8 +15,7 @@
 #include "include/gpu/graphite/Recording.h"
 #include "include/gpu/graphite/Surface.h"
 #include "include/gpu/graphite/mtl/MtlBackendContext.h"
-#include "include/gpu/graphite/mtl/MtlGraphiteTypesUtils.h"
-#include "include/gpu/graphite/mtl/MtlGraphiteUtils.h"
+#include "include/gpu/graphite/mtl/MtlGraphiteTypes.h"
 #include "src/base/SkMathPriv.h"
 #include "src/gpu/graphite/ContextOptionsPriv.h"
 #include "tools/graphite/GraphiteToolUtils.h"
@@ -29,12 +28,14 @@ using skwindow::internal::GraphiteMetalWindowContext;
 namespace skwindow::internal {
 
 GraphiteMetalWindowContext::GraphiteMetalWindowContext(std::unique_ptr<const DisplayParams> params)
-        : WindowContext(DisplayParamsBuilder(params.get()).roundUpMSAA().build())
+        : WindowContext(DisplayParamsBuilder(params.get()).roundUpMSAA().detach())
         , fValid(false)
         , fDrawableHandle(nil) {}
 
 void GraphiteMetalWindowContext::initializeContext() {
+#if defined(SK_GANESH)
     SkASSERT(!fContext);
+#endif
     SkASSERT(!fGraphiteContext);
 
     fDevice.reset(MTLCreateSystemDefaultDevice());
@@ -65,7 +66,7 @@ void GraphiteMetalWindowContext::initializeContext() {
     // Needed to make synchronous readPixels work:
     opts.fPriv.fStoreContextRefInRecorder = true;
     fDisplayParams =
-            GraphiteDisplayParamsBuilder(fDisplayParams.get()).graphiteTestOptions(opts).build();
+            GraphiteDisplayParamsBuilder(fDisplayParams.get()).graphiteTestOptions(opts).detach();
     fGraphiteContext = skgpu::graphite::ContextFactory::MakeMetal(
             backendContext, fDisplayParams->graphiteTestOptions()->fTestOptions.fContextOptions);
     fGraphiteRecorder = fGraphiteContext->makeRecorder(ToolUtils::CreateTestingRecorderOptions());

@@ -13,6 +13,7 @@
 #include <optional>
 
 #include "include/codec/SkCodec.h"
+#include "include/codec/SkEncodedOrigin.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkRefCnt.h"
 #include "include/private/SkEncodedInfo.h"
@@ -27,7 +28,7 @@ enum class SkEncodedImageFormat;
 template <typename T> class SkSpan;
 
 // This class implements functionality shared between `SkPngCodec` and
-// `SkPngRustCodec` (the latter is from `experimental/rust_png`).
+// `SkPngRustCodec`.
 class SkPngCodecBase : public SkCodec {
 public:
     ~SkPngCodecBase() override;
@@ -35,7 +36,7 @@ public:
     static bool isCompatibleColorProfileAndType(const SkEncodedInfo::ICCProfile* profile,
                                                 SkEncodedInfo::Color color);
 protected:
-    SkPngCodecBase(SkEncodedInfo&&, std::unique_ptr<SkStream>);
+    SkPngCodecBase(SkEncodedInfo&&, std::unique_ptr<SkStream>, SkEncodedOrigin origin);
 
     // Initialize most fields needed by `applyXformRow`.
     //
@@ -101,9 +102,7 @@ private:
     sk_sp<SkColorPalette> fColorTable;
 
     size_t fEncodedRowBytes = 0;  // Size of encoded/source row in bytes.
-#if defined(SK_DEBUG)
     size_t fDstRowBytes = 0;      // Size of destination row in bytes.
-#endif
 
     std::optional<SkImageInfo> fDstInfoOfPreviousColorTableCreation;
 };

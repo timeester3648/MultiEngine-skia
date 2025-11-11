@@ -26,8 +26,8 @@ using SkJpegMarkerList = std::vector<SkJpegMarker>;
 
 class SkJpegMetadataDecoderImpl : public SkJpegMetadataDecoder {
 public:
-    SkJpegMetadataDecoderImpl(SkJpegMarkerList markerList);
-    SkJpegMetadataDecoderImpl(sk_sp<SkData> data);
+    explicit SkJpegMetadataDecoderImpl(SkJpegMarkerList markerList);
+    explicit SkJpegMetadataDecoderImpl(sk_sp<SkData> data);
 
     bool findGainmapImage(SkJpegSourceMgr* sourceMgr,
                           sk_sp<SkData>& outGainmapImageData,
@@ -45,6 +45,7 @@ public:
     bool findGainmapImage(sk_sp<SkData> baseImageData,
                           sk_sp<SkData>& outGainmapImageData,
                           SkGainmapInfo& outGainmapInfo) override;
+    sk_sp<SkData> getJUMBFMetadata(bool copyData) const override;
 
 private:
     SkJpegMarkerList fMarkerList;

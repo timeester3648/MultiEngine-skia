@@ -12,9 +12,12 @@ skia_cc_library(
     srcs = [
         "ContextFactory.cpp",
         "ContextFactory.h",
+        "GraphiteMemoryPipelineStorage.cpp",
+        "GraphiteMemoryPipelineStorage.h",
         "GraphiteTestContext.cpp",
         "GraphiteTestContext.h",
         "GraphiteToolUtils.cpp",
+        "PipelineCallbackHandler.cpp",
         "ProtectedUtils_Graphite.cpp",
         "TestOptions.h",
         "UniqueKeyUtils.cpp",
@@ -23,10 +26,12 @@ skia_cc_library(
     hdrs = [
         "ContextFactory.h",
         "GraphiteToolUtils.h",
+        "PipelineCallbackHandler.h",
         "TestOptions.h",
     ],
     visibility = [
         "//bench:__subpackages__",
+        "//dm:__pkg__",
         "//modules/skottie:__pkg__",
         "//tools:__subpackages__",
     ],

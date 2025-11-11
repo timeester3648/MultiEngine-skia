@@ -27,8 +27,8 @@
 #include "src/gpu/graphite/ContextPriv.h"
 #include "src/gpu/graphite/RecorderPriv.h"
 #include "src/gpu/graphite/ResourceTypes.h"
+#include "tests/ComparePixels.h"
 #include "tests/Test.h"
-#include "tests/TestUtils.h"
 #include "tools/ToolUtils.h"
 #include "tools/gpu/BackendTextureImageFactory.h"
 #include "tools/gpu/ManagedBackendTexture.h"
@@ -45,6 +45,7 @@ static constexpr int min_rgb_channel_bits(SkColorType ct) {
         case kRGB_565_SkColorType:            return 5;
         case kARGB_4444_SkColorType:          return 4;
         case kR8G8_unorm_SkColorType:         return 8;
+        case kR16_unorm_SkColorType:          return 16;
         case kR16G16_unorm_SkColorType:       return 16;
         case kR16G16_float_SkColorType:       return 16;
         case kRGBA_8888_SkColorType:          return 8;
@@ -78,6 +79,7 @@ static constexpr int alpha_channel_bits(SkColorType ct) {
         case kRGB_565_SkColorType:            return 0;
         case kARGB_4444_SkColorType:          return 4;
         case kR8G8_unorm_SkColorType:         return 0;
+        case kR16_unorm_SkColorType:          return 0;
         case kR16G16_unorm_SkColorType:       return 0;
         case kR16G16_float_SkColorType:       return 0;
         case kRGBA_8888_SkColorType:          return 8;
@@ -224,7 +226,7 @@ static SkAutoPixmapStorage make_ref_data(const SkImageInfo& info, bool forceOpaq
         surface->getCanvas()->drawPaint(paint);
     }
     return result;
-};
+}
 }  // anonymous namespace
 
 template <typename T>
@@ -518,14 +520,14 @@ static void async_callback(void* c, std::unique_ptr<const SkImage::AsyncReadResu
     auto context = static_cast<AsyncContext*>(c);
     context->fResult = std::move(result);
     context->fCalled = true;
-};
+}
 
 DEF_CONDITIONAL_GRAPHITE_TEST_FOR_RENDERING_CONTEXTS(ImageAsyncReadPixelsGraphite,
                                                      reporter,
                                                      context,
                                                      testContext,
                                                      true,
-                                                     CtsEnforcement::kApiLevel_V) {
+                                                     CtsEnforcement::kApiLevel_202404) {
     using Image = sk_sp<SkImage>;
     using Renderable = skgpu::Renderable;
     using TextureInfo = skgpu::graphite::TextureInfo;
@@ -606,7 +608,7 @@ DEF_CONDITIONAL_GRAPHITE_TEST_FOR_RENDERING_CONTEXTS(SurfaceAsyncReadPixelsGraph
                                                      context,
                                                      testContext,
                                                      true,
-                                                     CtsEnforcement::kApiLevel_V) {
+                                                     CtsEnforcement::kApiLevel_202404) {
     using Surface = sk_sp<SkSurface>;
 
     auto reader = std::function<GraphiteReadSrcFn<Surface>>([context, testContext](

@@ -17,8 +17,8 @@ namespace skgpu {
 
 Plot::Plot(int pageIndex, int plotIndex, AtlasGenerationCounter* generationCounter,
            int offX, int offY, int width, int height, SkColorType colorType, size_t bpp)
-        : fLastUpload(AtlasToken::InvalidToken())
-        , fLastUse(AtlasToken::InvalidToken())
+        : fLastUpload(Token::InvalidToken())
+        , fLastUse(Token::InvalidToken())
         , fFlushesSinceLastUse(0)
         , fPageIndex(pageIndex)
         , fPlotIndex(plotIndex)
@@ -157,15 +157,18 @@ std::pair<const void*, SkIRect> Plot::prepareForUpload() {
     return { dataPtr, offsetRect };
 }
 
-void Plot::resetRects() {
+void Plot::resetRects(bool freeData) {
     fRectanizer.reset();
     fGenID = fGenerationCounter->next();
     fPlotLocator = PlotLocator(fPageIndex, fPlotIndex, fGenID);
-    fLastUpload = AtlasToken::InvalidToken();
-    fLastUse = AtlasToken::InvalidToken();
+    fLastUpload = Token::InvalidToken();
+    fLastUse = Token::InvalidToken();
 
-    // zero out the plot
-    if (fData) {
+    if (freeData) {
+        sk_free(fData);
+        fData = nullptr;
+    } else if (fData) {
+        // zero out the plot
         sk_bzero(fData, fBytesPerPixel * fWidth * fHeight);
     }
 

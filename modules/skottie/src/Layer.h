@@ -47,9 +47,6 @@ public:
 
     const sk_sp<sksg::RenderNode>& getContentTree(const AnimationBuilder&, CompositionBuilder*);
 
-    // TODO: convert existing effect callers to getContentTree() and remove.
-    const sk_sp<sksg::RenderNode>& contentTree() const { return fContentTree; }
-
     const SkSize& size() const { return fInfo.fSize; }
 
 private:
@@ -66,8 +63,6 @@ private:
     };
 
     bool is3D() const { return fFlags & Flags::kIs3D; }
-
-    bool hasMotionBlur(const CompositionBuilder*) const;
 
     // Attaches the layer content (excluding motion blur, layer controller, and mattes).
     // Can be called transitively, but only once per layer (via getContentTree, which caches
@@ -88,7 +83,7 @@ private:
 
     using LayerBuilderFunc =
         sk_sp<sksg::RenderNode> (AnimationBuilder::*)(const skjson::ObjectValue&,
-                                                      AnimationBuilder::LayerInfo*) const;
+                                                      LayerInfo*) const;
     struct BuilderInfo {
         LayerBuilderFunc fBuilder = nullptr;
         uint32_t         fFlags   = 0;
@@ -100,7 +95,7 @@ private:
     const int                  fType;
     const bool                 fAutoOrient;
 
-    AnimationBuilder::LayerInfo fInfo;
+    LayerInfo                  fInfo;
     BuilderInfo                fBuilderInfo;
     sk_sp<sksg::Transform>     fLayerTransform;             // this layer's transform node.
     sk_sp<sksg::Transform>     fTransformCache[2];          // cached 2D/3D chain for the local node

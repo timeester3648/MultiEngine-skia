@@ -26,7 +26,21 @@ class Buffer;
 SK_MAKE_BITMASK_OPS(DepthStencilFlags)
 
 /**
- * This enum is used to specify the load operation to be used when a RenderPass begins execution
+ * The strategy that a renderpass and/or pipeline use to access the current dst pixel when blending.
+ */
+enum class DstReadStrategy : uint8_t {
+    kNoneRequired,
+    kTextureCopy,
+    kTextureSample,  // TODO(b/238756862): To be used once direct texture sampling is implemented
+    kReadFromInput,
+    kFramebufferFetch,
+
+    kLast = kFramebufferFetch
+};
+inline static constexpr int kDstReadStrategyCount = (int)(DstReadStrategy::kLast) + 1;
+
+/**
+ * This enum is used to specify the load operation to be used when a RenderPass begins execution.
  */
 enum class LoadOp : uint8_t {
     kLoad,
@@ -72,7 +86,7 @@ static const int kBufferTypeCount = static_cast<int>(BufferType::kLast) + 1;
 /**
  * Data layout requirements on host-shareable buffer contents.
  */
-enum class Layout {
+enum class Layout : uint8_t {
     kInvalid = 0,
     kStd140,
     kStd430,
@@ -96,13 +110,16 @@ static constexpr const char* LayoutString(Layout layout) {
  * This is only a hint and the actual memory type will be determined based on the resource type and
  * backend capabilities.
  */
-enum class AccessPattern : int {
+enum class AccessPattern : uint8_t {
     // GPU-only memory does not need to support reads/writes from the CPU. GPU-private memory will
     // be preferred if the backend supports an efficient private memory type.
     kGpuOnly,
 
     // The resource needs to be CPU visible, e.g. for read-back or as a copy/upload source.
     kHostVisible,
+
+    // Use to debug GPU only buffers.
+    kGpuOnlyCopySrc,
 };
 
 /**
@@ -123,7 +140,7 @@ enum class Discardable : bool {
     kYes = true
 };
 
-enum class Ownership {
+enum class Ownership : uint8_t {
     kOwned,
     kWrapped,
 };
@@ -135,19 +152,10 @@ using ResourceType = uint32_t;
  * Can the resource be held by multiple users at the same time?
  * For example, stencil buffers, pipelines, etc.
  */
-enum class Shareable : bool {
-    kNo = false,
-    kYes = true,
-};
-
-/**
- * This enum is used to notify the ResourceCache which type of ref just dropped to zero on a
- * Resource.
- */
-enum class LastRemovedRef {
-    kUsage,
-    kCommandBuffer,
-    kCache,
+enum class Shareable : uint8_t {
+    kNo,      // The resource is visible in the ResourceCache once all its usage refs are dropped
+    kScratch, // The resource is visible to other Recorders, but acts like kNo within a Recording
+    kYes,     // The resource is always visible in the ResourceCache
 };
 
 /*
@@ -160,7 +168,7 @@ struct BindBufferInfo {
     uint32_t fOffset = 0;
     uint32_t fSize = 0;
 
-    operator bool() const { return SkToBool(fBuffer); }
+    explicit operator bool() const { return SkToBool(fBuffer); }
 
     bool operator==(const BindBufferInfo& o) const {
         return fBuffer == o.fBuffer && (!fBuffer || (fOffset == o.fOffset && fSize == o.fSize));
@@ -177,7 +185,6 @@ struct ImmutableSamplerInfo {
     uint64_t fFormat = 0;
 };
 
-
 /**
  * Struct used to describe how a Texture/TextureProxy/TextureProxyView is sampled.
  */
@@ -188,8 +195,8 @@ struct SamplerDesc {
             : SamplerDesc(samplingOptions, {tileMode, tileMode}) {}
 
     constexpr SamplerDesc(const SkSamplingOptions& samplingOptions,
-                const std::pair<SkTileMode, SkTileMode> tileModes,
-                const ImmutableSamplerInfo info = {})
+                          const std::pair<SkTileMode, SkTileMode> tileModes,
+                          const ImmutableSamplerInfo info = {})
             : fDesc((static_cast<int>(tileModes.first)            << kTileModeXShift           ) |
                     (static_cast<int>(tileModes.second)           << kTileModeYShift           ) |
                     (static_cast<int>(samplingOptions.filter)     << kFilterModeShift          ) |
@@ -212,6 +219,12 @@ struct SamplerDesc {
     }
     constexpr SamplerDesc() = default;
     constexpr SamplerDesc(const SamplerDesc&) = default;
+    constexpr SamplerDesc& operator=(const SamplerDesc&) = default;
+
+    constexpr SamplerDesc(uint32_t desc, uint32_t format, uint32_t extFormatMSB)
+            : fDesc(desc)
+            , fFormat(format)
+            , fExternalFormatMostSignificantBits(extFormatMSB) {}
 
     bool operator==(const SamplerDesc& o) const {
         return o.fDesc == fDesc && o.fFormat == fFormat &&
@@ -220,8 +233,18 @@ struct SamplerDesc {
 
     bool operator!=(const SamplerDesc& o) const { return !(*this == o); }
 
-    SkTileMode tileModeX()          const { return static_cast<SkTileMode>((fDesc >> 0) & 0b11); }
-    SkTileMode tileModeY()          const { return static_cast<SkTileMode>((fDesc >> 2) & 0b11); }
+    SkTileMode tileModeX()          const {
+        return static_cast<SkTileMode>((fDesc >> kTileModeXShift) & 0b11);
+    }
+    SkTileMode tileModeY()          const {
+        return static_cast<SkTileMode>((fDesc >> kTileModeYShift) & 0b11);
+    }
+    SkFilterMode filterMode()       const {
+        return static_cast<SkFilterMode>((fDesc >> kFilterModeShift) & 0b01);
+    }
+    SkMipmapMode mipmap()           const {
+        return static_cast<SkMipmapMode>((fDesc >> kMipmapModeShift) & 0b11);
+    }
     uint32_t   desc()               const { return fDesc;                                        }
     uint32_t   format()             const { return fFormat;                                      }
     uint32_t   externalFormatMSBs() const { return fExternalFormatMostSignificantBits;           }
@@ -232,8 +255,8 @@ struct SamplerDesc {
     // nearest-neighbor sampling in HW.
     SkSamplingOptions samplingOptions() const {
         // TODO: Add support for anisotropic filtering
-        SkFilterMode filter = static_cast<SkFilterMode>((fDesc >> 4) & 0b01);
-        SkMipmapMode mipmap = static_cast<SkMipmapMode>((fDesc >> 5) & 0b11);
+        SkFilterMode filter = static_cast<SkFilterMode>((fDesc >> kFilterModeShift) & 0b01);
+        SkMipmapMode mipmap = static_cast<SkMipmapMode>((fDesc >> kMipmapModeShift) & 0b11);
         return SkSamplingOptions(filter, mipmap);
     }
 
@@ -282,6 +305,6 @@ private:
     uint32_t fExternalFormatMostSignificantBits = 0;
 };
 
-};  // namespace skgpu::graphite
+}  // namespace skgpu::graphite
 
 #endif // skgpu_graphite_ResourceTypes_DEFINED

@@ -10,7 +10,6 @@
 #include "include/codec/SkCodec.h"
 #include "include/codec/SkEncodedImageFormat.h"
 #include "include/core/SkBBHFactory.h"
-#include "include/core/SkColorPriv.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkData.h"
 #include "include/core/SkDocument.h"
@@ -22,6 +21,7 @@
 #include "src/base/SkTime.h"
 #include "src/base/SkVx.h"
 #include "src/core/SkChecksum.h"
+#include "src/core/SkColorPriv.h"
 #include "src/core/SkColorSpacePriv.h"
 #include "src/core/SkMD5.h"
 #include "src/core/SkOSFile.h"
@@ -66,10 +66,6 @@
     #include <unistd.h>
 #endif
 
-#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(SK_HAS_HEIF_LIBRARY)
-    #include <binder/IPCThreadState.h>
-#endif
-
 #if defined(SK_BUILD_FOR_MAC)
     #include "include/utils/mac/SkCGUtils.h"
     #include "src/utils/mac/SkUniqueCFRef.h"
@@ -83,8 +79,9 @@ using namespace skia_private;
 
 extern bool gSkForceRasterPipelineBlitter;
 extern bool gForceHighPrecisionRasterPipeline;
+#if defined(SK_GANESH)
 extern bool gCreateProtectedContext;
-
+#endif
 static DEFINE_string(src, "tests gm skp mskp lottie rive svg image colorImage",
                      "Source types to test.");
 static DEFINE_bool(nameByHash, false,
@@ -184,10 +181,12 @@ using namespace DM;
 #if !defined(SK_DISABLE_LEGACY_TESTS)
 using skiatest::TestType;
 #endif
+#if defined(SK_GANESH)
 using sk_gpu_test::GrContextFactory;
 using sk_gpu_test::ContextInfo;
 #ifdef SK_GL
 using sk_gpu_test::GLTestContext;
+#endif
 #endif
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
@@ -837,7 +836,7 @@ static void push_codec_srcs(Path path) {
         };
         for (const char* rawExt : rawExts) {
             if (0 == strcmp(rawExt, ext)) {
-                // RAW is not supported by image generator (skbug.com/5079) or BRD.
+                // RAW is not supported by image generator (skbug.com/40036243) or BRD.
                 return;
             }
         }
@@ -973,11 +972,15 @@ static void push_sink(const SkCommandLineConfig& config, Sink* s) {
     ts.tag = config.getTag();
 }
 
-static Sink* create_sink(const GrContextOptions& grCtxOptions,
+static Sink* create_sink(
+#if defined(SK_GANESH)
+                         const GrContextOptions& grCtxOptions,
+#endif
 #if defined(SK_GRAPHITE)
                          const skiatest::graphite::TestOptions& graphiteOptions,
 #endif
                          const SkCommandLineConfig* config) {
+#if defined(SK_GANESH)
     if (FLAGS_gpu) {
         if (const SkCommandLineConfigGpu* gpuConfig = config->asConfigGpu()) {
             GrContextFactory testFactory(grCtxOptions);
@@ -988,8 +991,8 @@ static Sink* create_sink(const GrContextOptions& grCtxOptions,
             }
             if (gpuConfig->getTestPersistentCache()) {
                 return new GPUPersistentCacheTestingSink(gpuConfig, grCtxOptions);
-            } else if (gpuConfig->getTestPrecompile()) {
-                return new GPUPrecompileTestingSink(gpuConfig, grCtxOptions);
+            } else if (gpuConfig->getTestPrecompileGanesh()) {
+                return new GaneshPrecompileTestingSink(gpuConfig, grCtxOptions);
             } else if (gpuConfig->getUseDDLSink()) {
                 return new GPUDDLSink(gpuConfig, grCtxOptions);
             } else if (gpuConfig->getSlug()) {
@@ -1003,11 +1006,18 @@ static Sink* create_sink(const GrContextOptions& grCtxOptions,
             }
         }
     }
+#endif
 #if defined(SK_GRAPHITE)
     if (FLAGS_graphite) {
         if (const SkCommandLineConfigGraphite *graphiteConfig = config->asConfigGraphite()) {
+            if (graphiteConfig->getTestPersistentStorage()) {
+                return new GraphitePersistentPipelineStorageTestingSink(graphiteConfig,
+                                                                        graphiteOptions);
+            } else if (graphiteConfig->getTestPipelineTracking()) {
+                return new GraphitePipelineTrackingSink(graphiteConfig, graphiteOptions);
+            } else
 #if defined(SK_ENABLE_PRECOMPILE)
-            if (graphiteConfig->getTestPrecompile()) {
+            if (graphiteConfig->getTestPrecompileGraphite()) {
                 return new GraphitePrecompileTestingSink(graphiteConfig, graphiteOptions);
             } else
 #endif // SK_ENABLE_PRECOMPILE
@@ -1080,7 +1090,10 @@ static Sink* create_via(const SkString& tag, Sink* wrapped) {
     return nullptr;
 }
 
-static bool gather_sinks(const GrContextOptions& grCtxOptions,
+static bool gather_sinks(
+#if defined(SK_GANESH)
+                         const GrContextOptions& grCtxOptions,
+#endif
 #if defined(SK_GRAPHITE)
                          const skiatest::graphite::TestOptions& graphiteOptions,
 #endif
@@ -1096,7 +1109,10 @@ static bool gather_sinks(const GrContextOptions& grCtxOptions,
     AutoreleasePool pool;
     for (int i = 0; i < configs.size(); i++) {
         const SkCommandLineConfig& config = *configs[i];
-        Sink* sink = create_sink(grCtxOptions,
+        Sink* sink = create_sink(
+#if defined(SK_GANESH)
+                                 grCtxOptions,
+#endif
 #if defined(SK_GRAPHITE)
                                  graphiteOptions,
 #endif
@@ -1360,6 +1376,12 @@ struct Task {
                 return SkStringPrintf("%.3g %.3g %.3g %.3g %.3g %.3g %.3g",
                                         tf.g, tf.a, tf.b, tf.c, tf.d, tf.e, tf.f);
 
+            case skcms_TFType_PQ:
+                return SkStringPrintf("PQ %.3g", tf.a);
+
+            case skcms_TFType_HLG:
+                return SkStringPrintf("HLGish %.3g %.3g %.3g", tf.a, tf.b, tf.c);
+
             case skcms_TFType_PQish:
                 if (eq(tf, SkNamedTransferFn::kPQ)) { return SkString("PQ"); }
                 return SkStringPrintf("PQish %.3g %.3g %.3g %.3g %.3g %.3g",
@@ -1370,8 +1392,7 @@ struct Task {
                 return SkStringPrintf("HLGish %.3g %.3g %.3g %.3g %.3g (%.3g)",
                                       tf.a, tf.b, tf.c, tf.d, tf.e, tf.f+1);
 
-            case skcms_TFType_HLGinvish: break;
-            case skcms_TFType_Invalid: break;
+            default: break;
         }
         return SkString("non-numeric");
     }
@@ -1531,6 +1552,7 @@ static void run_cpu_test(skiatest::Test test) {
     done("unit", "test", "", test.fName);
 }
 
+#if defined(SK_GANESH)
 static void run_ganesh_test(skiatest::Test test, const GrContextOptions& grCtxOptions) {
     DMReporter reporter;
     if (!FLAGS_dryRun && !should_skip("_", "tests", "_", test.fName)) {
@@ -1544,6 +1566,7 @@ static void run_ganesh_test(skiatest::Test test, const GrContextOptions& grCtxOp
     }
     done("unit", "test", "", test.fName);
 }
+#endif
 
 #if defined(SK_GRAPHITE)
 static void run_graphite_test(skiatest::Test test,
@@ -1573,9 +1596,6 @@ TestHarness CurrentTestHarness() {
 #endif // !SK_DISABLE_LEGACY_TESTS
 
 int main(int argc, char** argv) {
-#if defined(SK_BUILD_FOR_ANDROID_FRAMEWORK) && defined(SK_HAS_HEIF_LIBRARY)
-    android::ProcessState::self()->startThreadPool();
-#endif
     CommandLineFlags::Parse(argc, argv);
 
     initializeEventTracingForTools();
@@ -1590,7 +1610,9 @@ int main(int argc, char** argv) {
 
     gSkForceRasterPipelineBlitter     = FLAGS_forceRasterPipelineHP || FLAGS_forceRasterPipeline;
     gForceHighPrecisionRasterPipeline = FLAGS_forceRasterPipelineHP;
+#if defined(SK_GANESH)
     gCreateProtectedContext           = FLAGS_createProtected;
+#endif
 
     // The bots like having a verbose.log to upload, so always touch the file even if --verbose.
     if (!FLAGS_writePath.isEmpty()) {
@@ -1606,8 +1628,10 @@ int main(int argc, char** argv) {
     CommonFlags::SetTestOptions(&graphiteOptions);
 #endif
 
+#if defined(SK_GANESH)
     GrContextOptions grCtxOptions;
     CommonFlags::SetCtxOptions(&grCtxOptions);
+#endif
 
     dump_json();  // It's handy for the bots to assume this is ~never missing.
 
@@ -1634,7 +1658,10 @@ int main(int argc, char** argv) {
             break;
         }
     }
-    if (!gather_sinks(grCtxOptions,
+    if (!gather_sinks(
+#if defined(SK_GANESH)
+                      grCtxOptions,
+#endif
 #if defined(SK_GRAPHITE)
                       graphiteOptions,
 #endif
@@ -1688,7 +1715,9 @@ int main(int argc, char** argv) {
     for (Task& task : serial) { Task::Run(task); }
 
 #if !defined(SK_DISABLE_LEGACY_TESTS)
+#if defined(SK_GANESH)
     for (skiatest::Test& test : *gGaneshTests) { run_ganesh_test(test, grCtxOptions); }
+#endif
 
 #if defined(SK_GRAPHITE)
     for (skiatest::Test& test : *gGraphiteTests) { run_graphite_test(test, graphiteOptions); }
@@ -1698,6 +1727,10 @@ int main(int argc, char** argv) {
     // Wait for any remaining parallel work to complete (including any spun off of serial tasks).
     parallel.wait();
     gDefinitelyThreadSafeWork->wait();
+
+    for (const TaggedSink& sink : *gSinks) {
+        sink->done();
+    }
 
     // At this point we're back in single-threaded land.
 

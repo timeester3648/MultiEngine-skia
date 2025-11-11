@@ -83,8 +83,8 @@ bool Window_mac::initWindow() {
     constexpr int initialHeight = 960;
     NSRect windowRect = NSMakeRect(100, 100, initialWidth, initialHeight);
 
-    NSUInteger windowStyle = (NSTitledWindowMask | NSClosableWindowMask | NSResizableWindowMask |
-                              NSMiniaturizableWindowMask);
+    NSUInteger windowStyle = (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                              NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable);
 
     fWindow = [[NSWindow alloc] initWithContentRect:windowRect styleMask:windowStyle
                                 backing:NSBackingStoreBuffered defer:NO];
@@ -153,7 +153,7 @@ bool Window_mac::attach(BackendType attachType) {
             break;
 #endif
 #if defined(SK_GRAPHITE) && defined(SK_DAWN)
-        case kGraphiteDawn_BackendType:
+        case kGraphiteDawnMetal_BackendType:
             fWindowContext = MakeGraphiteDawnMetalForMac(info, fRequestedDisplayParams->clone());
             break;
 #endif
@@ -296,7 +296,9 @@ static skui::ModifierKey get_modifiers(const NSEvent* event) {
         modifiers |= skui::ModifierKey::kOption;
     }
 
-    if ((NSKeyDown == [event type] || NSKeyUp == [event type]) && ![event isARepeat]) {
+    if ((NSEventTypeKeyDown == [event type] || NSEventTypeKeyUp == [event type]) &&
+        ![event isARepeat])
+    {
         modifiers |= skui::ModifierKey::kFirstPress;
     }
 

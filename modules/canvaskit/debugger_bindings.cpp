@@ -20,6 +20,7 @@
 #include "include/encode/SkPngEncoder.h"
 #include "src/base/SkBase64.h"
 #include "src/core/SkPicturePriv.h"
+#include "src/ports/SkTypeface_FreeType.h"
 #include "src/utils/SkJSONWriter.h"
 #include "tools/SkSharingProc.h"
 #include "tools/UrlDataManager.h"
@@ -80,6 +81,13 @@ static sk_sp<SkImage> deserializeImage(sk_sp<SkData> data, std::optional<SkAlpha
   return img;
 }
 
+static void register_typeface() {
+  static SkOnce once;
+  once([] {
+    SkTypeface::Register(SkTypeface_FreeType::FactoryId,
+                         SkTypeface_FreeType::MakeFromStream );
+  });
+}
 
 class SkpDebugPlayer {
   public:
@@ -159,12 +167,12 @@ class SkpDebugPlayer {
 
     // Gets the bounds for the given frame
     // (or layer update, assuming there is one at that frame for fInspectedLayer)
-    const SkIRect getBoundsForFrame(int32_t frame) {
-      if (fInspectedLayer < 0) {
-        return fBoundsArray[frame];
-      }
-      auto summary = fLayerManager->event(fInspectedLayer, fp);
-      return SkIRect::MakeWH(summary.layerWidth, summary.layerHeight);
+    SkIRect getBoundsForFrame(int32_t frame) {
+        if (fInspectedLayer < 0) {
+            return fBoundsArray[frame];
+        }
+        auto summary = fLayerManager->event(fInspectedLayer, fp);
+        return SkIRect::MakeWH(summary.layerWidth, summary.layerHeight);
     }
 
     // Gets the bounds for the current frame
@@ -392,6 +400,7 @@ class SkpDebugPlayer {
       // Loads a single frame (traditional) skp file from the provided data stream and returns
       // a newly allocated DebugCanvas initialized with the SkPicture that was in the file.
       std::unique_ptr<DebugCanvas> loadSingleFrame(SkMemoryStream* stream) {
+        register_typeface();
         SkDeserialProcs procs;
         procs.fImageDataProc = deserializeImage;
         // note overloaded = operator that actually does a move
@@ -411,6 +420,7 @@ class SkpDebugPlayer {
       }
 
       std::string loadMultiFrame(SkMemoryStream* stream) {
+        register_typeface();
         // Attempt to deserialize with an image sharing serial proc.
         auto deserialContext = std::make_unique<SkSharingDeserialContext>();
         SkDeserialProcs procs;
