@@ -67,7 +67,8 @@ void main(MultiBuild::Workspace& workspace) {
 
 		"./src/gpu/graphite/compute/*Vello*",
 		
-		"./src/encode/*SkPngEncoderImpl*",
+		"./src/encode/*SkPngEncoder*",
+		"./src/encode/*SkPngRustEncoder*",
 		"./src/encode/*SkJpegEncoderImpl*",
 		"./src/encode/*SkJPEGWriteUtility*",
 		"./src/encode/*SkWebpEncoder_none*",
@@ -104,7 +105,7 @@ void main(MultiBuild::Workspace& workspace) {
 	
 	{
 		MultiBuild::ScopedFilter _(project, "project.compiler:VisualCpp");
-		properties.disable_warnings({ "4244", "4267", "4291", "4806" });
+		properties.disable_warnings({ "4244", "4267", "4291", "4806", "5030" });
 	}
 
 	{
